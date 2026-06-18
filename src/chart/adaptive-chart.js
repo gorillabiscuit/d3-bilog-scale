@@ -7,6 +7,22 @@ import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile, windowKDE, windowMixture } from '../scale/window.js';
 
 
+// Linear interpolation of where v sits in the sorted array, as a fraction [0,1].
+// Unlike a discrete count, this never jumps when a cluster of identical values
+// crosses the boundary — it glides through the cluster smoothly.
+function smoothFraction(sorted, v) {
+  const n = sorted.length;
+  if (v <= sorted[0]) return 0;
+  if (v >= sorted[n - 1]) return 1;
+  let lo = 0, hi = n - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] <= v) lo = mid; else hi = mid;
+  }
+  const t = (v - sorted[lo]) / (sorted[hi] - sorted[lo]);
+  return (lo + t) / (n - 1);
+}
+
 function makeFmt(specifier) {
   if (specifier === 'currency') {
     return v => {
@@ -66,12 +82,19 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
   const xLo = Math.max(xMin + (xMax - xMin) * 0.001, Math.min(rawLo, xMax - (xMax - xMin) * 0.002));
   const xHi = Math.min(xMax - (xMax - xMin) * 0.001, Math.max(rawHi, xMin + (xMax - xMin) * 0.002));
 
-  // Pixel boundaries: for quantile we can derive from the fraction directly (smooth slider);
-  // for kde/mixture we derive from the data fraction that falls within the window.
-  const sorted = [...xValues].sort((a, b) => a - b);
-  const n = sorted.length;
-  const qLo = sorted.filter(v => v < xLo).length / n;
-  const qHi = sorted.filter(v => v <= xHi).length / n;
+  // Pixel boundaries must change continuously as the slider moves.
+  // Quantile: derive from the slider fraction directly — no data involved, always smooth.
+  // KDE/mixture: use interpolated fractional rank so a cluster of identical values
+  //   can't cause a step-change when xLo crosses them.
+  let qLo, qHi;
+  if (windowMethod === 'quantile' || !windowMethod) {
+    qLo = Math.max(0, 0.5 - window / 2);
+    qHi = Math.min(1, 0.5 + window / 2);
+  } else {
+    const sorted = [...xValues].sort((a, b) => a - b);
+    qLo = smoothFraction(sorted, xLo);
+    qHi = smoothFraction(sorted, xHi);
+  }
 
   const r0 = 0;
   const r1 = innerW * qLo;
