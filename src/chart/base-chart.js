@@ -29,11 +29,11 @@ export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 function fmt(v) {
   if (!Number.isFinite(v)) return '—';
   const abs = Math.abs(v);
-  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3)  return `$${(v / 1e3).toFixed(1)}k`;
-  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (abs >= 1e12) return `$${+( v / 1e12).toPrecision(3)}T`;
+  if (abs >= 1e9)  return `$${+(v / 1e9).toPrecision(3)}B`;
+  if (abs >= 1e6)  return `$${+(v / 1e6).toPrecision(3)}M`;
+  if (abs >= 1e3)  return `$${+(v / 1e3).toPrecision(3)}k`;
+  return `$${+v.toPrecision(3)}`;
 }
 
 const REGION_COLORS = {
@@ -138,8 +138,8 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
     .attr('transform', `translate(0,${innerH})`)
     .call(
       axisBottom(xScale)
-        .ticks(8)
-        .tickFormat(xScale.tickFormat ? xScale.tickFormat() : null)
+        .ticks(6)
+        .tickFormat(xScale.breakpointMethod ? xScale.tickFormat() : fmt)
     )
     .call((a) => {
       a.selectAll('text')

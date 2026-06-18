@@ -156,7 +156,19 @@ export function scaleAdaptive() {
   };
 
   scale.ticks = function (count = 10) {
-    return generateTicks(_regions, _range[1] - _range[0]);
+    const raw = generateTicks(_regions, _range[1] - _range[0]);
+    // Remove ticks that would render within MIN_GAP pixels of the previous one.
+    const MIN_GAP = 72;
+    const filtered = [];
+    let lastPx = -Infinity;
+    for (const v of raw) {
+      const px = scale(v);
+      if (px - lastPx >= MIN_GAP) {
+        filtered.push(v);
+        lastPx = px;
+      }
+    }
+    return filtered;
   };
 
   scale.tickFormat = function (count, specifier) {
