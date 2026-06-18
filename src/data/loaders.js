@@ -26,10 +26,13 @@ export async function loadUSGS() {
 }
 
 export async function loadNYC() {
-  // NYC Open Data Socrata API — rolling property sales, no auth required
+  // NYC Open Data Socrata API — rolling property sales, no auth required.
+  // No ORDER BY — default insertion order gives a representative mix of cheap
+  // deed transfers ($10) through trophy sales ($1B+), which is exactly the
+  // two-sided distribution we want to demonstrate.
   const url =
     'https://data.cityofnewyork.us/resource/usep-8jbt.json' +
-    '?$limit=600&$where=sale_price>0&$order=sale_price DESC';
+    '?$limit=800&$where=sale_price>0';
   const res = await fetch(url);
   const json = await res.json();
   const points = json
@@ -37,7 +40,7 @@ export async function loadNYC() {
       x: Number(r.sale_price),
       y: Number(r.gross_square_feet) || 0,
     }))
-    .filter((p) => p.x > 1000 && Number.isFinite(p.x));
+    .filter((p) => p.x >= 1 && Number.isFinite(p.x));
   return {
     points,
     xLabel: 'Sale price (USD)',

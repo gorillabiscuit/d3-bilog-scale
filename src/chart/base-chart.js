@@ -113,11 +113,7 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
     .call((a) => {
       a.selectAll('text')
         .attr('fill', '#a0a0c0')
-        .attr('font-size', '10px')
-        .attr('dy', null)
-        .attr('y', 9)
-        .attr('transform', 'rotate(-35)')
-        .style('text-anchor', 'end');
+        .attr('font-size', '10px');
       a.selectAll('line,path').attr('stroke', '#3a3a6a');
     });
 
