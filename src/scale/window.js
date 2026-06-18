@@ -61,9 +61,12 @@ export function windowKDE(values, slider) {
   }
 
   const k = slider * 4;
+  const positive = values.filter(v => v > 0);
+  const xMin = Math.min(...positive);
+  const xMax = Math.max(...positive);
   return {
-    xLo: Math.exp(peakLog - k * h),
-    xHi: Math.exp(peakLog + k * h),
+    xLo: Math.max(xMin, Math.exp(peakLog - k * h)),
+    xHi: Math.min(xMax, Math.exp(peakLog + k * h)),
   };
 }
 
@@ -113,8 +116,10 @@ export function windowMixture(values, slider) {
   const [clusterMu, clusterS] = s1 <= s2 ? [mu1, s1] : [mu2, s2];
 
   const k = slider * 4;
+  const xMin = Math.exp(sorted[0]);
+  const xMax = Math.exp(sorted[sorted.length - 1]);
   return {
-    xLo: Math.exp(clusterMu - k * clusterS),
-    xHi: Math.exp(clusterMu + k * clusterS),
+    xLo: Math.max(xMin, Math.exp(clusterMu - k * clusterS)),
+    xHi: Math.min(xMax, Math.exp(clusterMu + k * clusterS)),
   };
 }
