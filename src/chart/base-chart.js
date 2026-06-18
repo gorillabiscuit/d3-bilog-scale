@@ -142,7 +142,7 @@ export function createChart(points, xScale, {
       const ttW = Math.max(line1.length, line2.length) * 6.5 + 16;
       tt.select('.tt-bg').attr('width', ttW).attr('height', 46);
 
-      tt.style('display', null);
+      tt.raise().style('display', null);
       const [px, py] = pointer(event, g.node());
       positionTooltip(px, py, ttW, 46);
     })
