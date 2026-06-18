@@ -88,7 +88,7 @@
     <label for="dataset-selector">Dataset:</label>
     <select id="dataset-selector">
       <option value="usgs">USGS Earthquakes — magnitude / depth</option>
-      <option value="nyc">NYC Property Sales — sale price / sq ft</option>
+      <option value="nyc" selected>NYC Property Sales — sale price / price per sq ft</option>
       <option value="sba">SBA 7(a) Loans — loan amount / term</option>
       <option value="forbes">Forbes Global 2000 — revenue / profit</option>
       <option value="openalex">OpenAlex Citations — citation count / year</option>
@@ -96,7 +96,7 @@
     <label for="method-selector">Breakpoints:</label>
     <select id="method-selector">
       <option value="iqr">IQR (Tukey fences)</option>
-      <option value="log-iqr">Log-IQR (IQR in log space)</option>
+      <option value="log-iqr" selected>Log-IQR (IQR in log space)</option>
       <option value="percentile">Percentile (P10 / P90)</option>
     </select>
     <span id="status"></span>

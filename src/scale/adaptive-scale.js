@@ -10,7 +10,7 @@ export function scaleAdaptive() {
   let _range = [0, 1];
   let _data = [];
   let _method = 'iqr';
-  let _alpha = 0.5; // blend factor: 1 = equal thirds, 0 = pure density
+  let _alpha = 0.15; // blend factor: 1 = equal thirds, 0 = pure density-weighted
   let _clamp = false;
 
   // Derived — rebuilt whenever domain/range/data changes

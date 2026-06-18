@@ -1,9 +1,40 @@
-import { select } from 'd3-selection';
+import { select, pointer } from 'd3-selection';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { min, max } from 'd3-array';
 
+// Shared floating tooltip — one instance for the whole page
+let _tooltip = null;
+function getTooltip() {
+  if (!_tooltip) {
+    _tooltip = select('body').append('div')
+      .style('position', 'fixed')
+      .style('pointer-events', 'none')
+      .style('background', '#0d1a33')
+      .style('border', '1px solid #3a3a6a')
+      .style('border-radius', '4px')
+      .style('padding', '6px 10px')
+      .style('font-size', '11px')
+      .style('color', '#e0e0f0')
+      .style('line-height', '1.6')
+      .style('opacity', '0')
+      .style('transition', 'opacity 0.1s')
+      .style('z-index', '100');
+  }
+  return _tooltip;
+}
+
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
+
+function fmt(v) {
+  if (!Number.isFinite(v)) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3)  return `$${(v / 1e3).toFixed(1)}k`;
+  return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
 
 const REGION_COLORS = {
   log:    { fill: '#2a1040', label: '#9060c0' },
@@ -127,6 +158,7 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
   // ── Dots ─────────────────────────────────────────────────────────────────
   const dotOpacity = points.length > 500 ? 0.35 : points.length > 100 ? 0.55 : 0.8;
   const dotRadius  = points.length > 500 ? 2 : 3;
+  const tt = getTooltip();
 
   g.append('g')
     .attr('clip-path', `url(#clip-${container.id})`)
@@ -137,7 +169,20 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
     .attr('cy', (d) => yScale(d.y))
     .attr('r', dotRadius)
     .attr('fill', '#7070ff')
-    .attr('opacity', dotOpacity);
+    .attr('opacity', dotOpacity)
+    .on('mouseover', function (event, d) {
+      select(this).attr('r', dotRadius + 2).attr('fill', '#b0b0ff').attr('opacity', 1);
+      tt.html(`<b>${xLabel}</b>: ${fmt(d.x)}<br><b>${yLabel}</b>: ${fmt(d.y)}`)
+        .style('opacity', '1');
+    })
+    .on('mousemove', function (event) {
+      tt.style('left', (event.clientX + 12) + 'px')
+        .style('top',  (event.clientY - 28) + 'px');
+    })
+    .on('mouseout', function () {
+      select(this).attr('r', dotRadius).attr('fill', '#7070ff').attr('opacity', dotOpacity);
+      tt.style('opacity', '0');
+    });
 
   // ── Axis labels ──────────────────────────────────────────────────────────
   g.append('text')

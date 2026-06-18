@@ -36,15 +36,19 @@ export async function loadNYC() {
   const res = await fetch(url);
   const json = await res.json();
   const points = json
-    .map((r) => ({
-      x: Number(r.sale_price),
-      y: Number(r.gross_square_feet) || 0,
-    }))
-    .filter((p) => p.x >= 1 && Number.isFinite(p.x));
+    .map((r) => {
+      const price = Number(r.sale_price);
+      const sqft  = Number(r.gross_square_feet);
+      return {
+        x: price,
+        y: sqft > 0 ? price / sqft : null,
+      };
+    })
+    .filter((p) => p.x >= 1 && p.y !== null && Number.isFinite(p.x) && Number.isFinite(p.y));
   return {
     points,
     xLabel: 'Sale price (USD)',
-    yLabel: 'Gross sq ft',
+    yLabel: 'Price per sq ft (USD)',
     title: 'NYC Property Sales',
     description: 'NYC rolling property sales. $0/$1 deed transfers sit far below residential prices; trophy deals far above.',
   };
