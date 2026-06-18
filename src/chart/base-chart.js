@@ -176,8 +176,16 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
         .style('opacity', '1');
     })
     .on('mousemove', function (event) {
-      tt.style('left', (event.clientX + 12) + 'px')
-        .style('top',  (event.clientY - 28) + 'px');
+      const ttNode = tt.node();
+      const ttW = ttNode.offsetWidth;
+      const ttH = ttNode.offsetHeight;
+      const x = event.clientX + ttW + 16 > window.innerWidth
+        ? event.clientX - ttW - 8
+        : event.clientX + 12;
+      const y = event.clientY - 28 < 0
+        ? event.clientY + 8
+        : event.clientY - ttH - 4;
+      tt.style('left', x + 'px').style('top', y + 'px');
     })
     .on('mouseout', function () {
       select(this).attr('r', dotRadius).attr('fill', '#7070ff').attr('opacity', dotOpacity);
