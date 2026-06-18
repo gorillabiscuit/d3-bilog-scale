@@ -1,20 +1,16 @@
 import { scaleLinear } from 'd3-scale';
-import { min, max } from 'd3-array';
-import { renderChart, MARGIN } from './base-chart.js';
+import { extent } from 'd3-array';
+import { createChart, MARGIN } from './base-chart.js';
 
-export function createLinearChart(container, points, options = {}) {
-  if (!points || points.length === 0) return;
+export function createLinearChart(points, { width = 900, ...options } = {}) {
+  if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 
-  const width = container.clientWidth || 800;
   const innerW = width - MARGIN.left - MARGIN.right;
-
-  const xMin = min(points, (d) => d.x);
-  const xMax = max(points, (d) => d.x);
+  const [xMin, xMax] = extent(points, d => d.x);
 
   const xScale = scaleLinear()
-    .domain([xMin, xMax])
-    .range([0, innerW])
-    .nice();
+    .domain([xMin, xMax]).nice()
+    .range([0, innerW]);
 
-  renderChart(container, points, xScale, options);
+  return createChart(points, xScale, { width, ...options });
 }

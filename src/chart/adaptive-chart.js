@@ -1,23 +1,19 @@
 import { scaleAdaptive } from '../scale/adaptive-scale.js';
-import { renderChart, MARGIN } from './base-chart.js';
+import { createChart, MARGIN } from './base-chart.js';
 
-export function createAdaptiveChart(container, points, options = {}) {
-  if (!points || points.length === 0) return;
+export function createAdaptiveChart(points, { width = 900, method = 'iqr', ...options } = {}) {
+  const safe = points?.filter(d => d.x > 0 && Number.isFinite(d.x) && Number.isFinite(d.y));
+  if (!safe?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 
-  const width = container.clientWidth || 800;
   const innerW = width - MARGIN.left - MARGIN.right;
 
-  const safePoints = points.filter((d) => d.x > 0 && Number.isFinite(d.x) && Number.isFinite(d.y));
-  if (safePoints.length === 0) return;
-
-  const xValues = safePoints.map((d) => d.x);
-
   const xScale = scaleAdaptive()
-    .data(xValues)
+    .data(safe.map(d => d.x))
     .range([0, innerW])
-    .breakpointMethod(options.method || 'iqr');
+    .breakpointMethod(method);
 
-  renderChart(container, safePoints, xScale, {
+  return createChart(safe, xScale, {
+    width,
     ...options,
     regions: xScale.regions(),
   });

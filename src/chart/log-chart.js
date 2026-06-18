@@ -1,23 +1,17 @@
 import { scaleLog } from 'd3-scale';
-import { min, max } from 'd3-array';
-import { renderChart, MARGIN } from './base-chart.js';
+import { extent } from 'd3-array';
+import { createChart, MARGIN } from './base-chart.js';
 
-export function createLogChart(container, points, options = {}) {
-  if (!points || points.length === 0) return;
+export function createLogChart(points, { width = 900, ...options } = {}) {
+  const safe = points?.filter(d => d.x > 0 && Number.isFinite(d.x));
+  if (!safe?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 
-  const width = container.clientWidth || 800;
   const innerW = width - MARGIN.left - MARGIN.right;
-
-  const positivePoints = points.filter((d) => d.x > 0 && Number.isFinite(d.x));
-  if (positivePoints.length === 0) return;
-
-  const xMin = min(positivePoints, (d) => d.x);
-  const xMax = max(positivePoints, (d) => d.x);
+  const [xMin, xMax] = extent(safe, d => d.x);
 
   const xScale = scaleLog()
-    .domain([xMin, xMax])
-    .range([0, innerW])
-    .nice();
+    .domain([xMin, xMax]).nice()
+    .range([0, innerW]);
 
-  renderChart(container, positivePoints, xScale, options);
+  return createChart(safe, xScale, { width, ...options });
 }

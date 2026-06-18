@@ -20,6 +20,8 @@ export async function loadUSGS() {
     points,
     xLabel: 'Seismic energy (relative, mag-1 = 1)',
     yLabel: 'Depth (km)',
+    xFormat: '~s',
+    yFormat: '~s',
     title: 'USGS Earthquakes',
     description: 'Recent earthquakes. A mag-7 releases ~1000× the energy of a mag-5.',
   };
@@ -49,6 +51,8 @@ export async function loadNYC() {
     points,
     xLabel: 'Sale price (USD)',
     yLabel: 'Price per sq ft (USD)',
+    xFormat: 'currency',
+    yFormat: 'currency',
     title: 'NYC Property Sales',
     description: 'NYC rolling property sales. $0/$1 deed transfers sit far below residential prices; trophy deals far above.',
   };
@@ -75,7 +79,9 @@ export async function loadSBA() {
   return {
     points,
     xLabel: 'Loan amount (USD)',
-    yLabel: 'Term in months',
+    yLabel: 'Term (months)',
+    xFormat: 'currency',
+    yFormat: '~s',
     title: 'SBA 7(a) Loans',
     description: 'US Small Business Administration loans FY2020+. Most Express loans under $150K; max $5M.',
   };
@@ -110,6 +116,8 @@ export async function loadForbes() {
     points,
     xLabel: 'Revenue (USD)',
     yLabel: 'Profit (USD)',
+    xFormat: 'currency',
+    yFormat: 'currency',
     title: 'Forbes Global 2000',
     description: 'Top 2000 companies by revenue. Spans ~$500M (bottom) to $370B+ (Berkshire Hathaway).',
   };
@@ -130,6 +138,8 @@ export async function loadOpenAlex() {
     points,
     xLabel: 'Citation count',
     yLabel: 'Publication year',
+    xFormat: '~s',
+    yFormat: 'd',
     title: 'OpenAlex Citations',
     description: 'Most-cited academic papers. The majority of all papers have <10 citations; top papers exceed 300,000.',
   };

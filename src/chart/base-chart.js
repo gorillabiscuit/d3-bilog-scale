@@ -1,42 +1,28 @@
-import { select } from 'd3-selection';
+import { create, pointer, select } from 'd3-selection';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
-import { min, max } from 'd3-array';
-
-// Shared floating tooltip — one instance for the whole page
-let _tooltip = null;
-function getTooltip() {
-  if (!_tooltip) {
-    _tooltip = select('body').append('div')
-      .style('position', 'fixed')
-      .style('pointer-events', 'none')
-      .style('background', '#0d1a33')
-      .style('border', '1px solid #3a3a6a')
-      .style('border-radius', '4px')
-      .style('padding', '6px 10px')
-      .style('font-size', '11px')
-      .style('color', '#e0e0f0')
-      .style('line-height', '1.6')
-      .style('opacity', '0')
-      .style('transition', 'opacity 0.1s')
-      .style('z-index', '100');
-  }
-  return _tooltip;
-}
+import { extent } from 'd3-array';
+import { format } from 'd3-format';
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 
-// Unique per-render counter — avoids id collisions when containers lack an id attribute
-let _clipCounter = 0;
+// Incrementing counter for unique clip-path ids across chart instances.
+// Observable renders many cells simultaneously — a shared id silently breaks clipping.
+let _clipId = 0;
 
-function fmt(v) {
-  if (!Number.isFinite(v)) return '—';
+// d3.format uses SI prefixes: k, M, G (billion), T. Financial convention uses B for
+// billion, so currency values get their own formatter rather than "$~s" from d3-format.
+function currencyFmt(v) {
   const abs = Math.abs(v);
-  if (abs >= 1e12) return `$${+( v / 1e12).toPrecision(3)}T`;
+  if (abs >= 1e12) return `$${+(v / 1e12).toPrecision(3)}T`;
   if (abs >= 1e9)  return `$${+(v / 1e9).toPrecision(3)}B`;
   if (abs >= 1e6)  return `$${+(v / 1e6).toPrecision(3)}M`;
   if (abs >= 1e3)  return `$${+(v / 1e3).toPrecision(3)}k`;
   return `$${+v.toPrecision(3)}`;
+}
+
+function makeFmt(specifier) {
+  return specifier === 'currency' ? currencyFmt : format(specifier);
 }
 
 const REGION_COLORS = {
@@ -45,72 +31,89 @@ const REGION_COLORS = {
 };
 
 const REGION_LABELS = {
-  left_log:    'left tail (log)',
-  linear:      'dense cluster (linear)',
-  right_log:   'right tail (log)',
+  left_log:  'left tail (log)',
+  linear:    'dense cluster (linear)',
+  right_log: 'right tail (log)',
 };
 
 /**
- * Render a scatterplot into container using xScale.
- * xScale must have range [0, innerW].
- * options.regions — array from scaleAdaptive().regions(), used only for the adaptive chart.
+ * Create a scatterplot SVG node.
+ *
+ * Returns svg.node() — caller is responsible for inserting it into the DOM.
+ * This matches the Observable cell pattern: `chart = createChart(data, scale, {width})`.
+ *
+ * @param {Array<{x, y}>} points
+ * @param {Function} xScale  D3-compatible scale, already ranged to [0, innerWidth]
+ * @param {Object}   options
+ * @returns {SVGElement}
  */
-export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 'y', regions = [] } = {}) {
-  const width = container.clientWidth || 900;
-  const height = container.clientHeight || 260;
-  const innerW = width - MARGIN.left - MARGIN.right;
-  const innerH = height - MARGIN.top - MARGIN.bottom;
-  const clipId = `clip-${++_clipCounter}`;
+export function createChart(points, xScale, {
+  width   = 900,
+  height  = 260,
+  xLabel  = 'x',
+  yLabel  = 'y',
+  xFormat = '~s',
+  yFormat = '~s',
+  regions = [],
+} = {}) {
+  const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
+  const innerW = width  - mLeft - mRight;
+  const innerH = height - mTop  - mBot;
+  const clipId = `clip-${++_clipId}`;
 
-  select(container).selectAll('*').remove();
+  // Y scale — linear across all three chart variants
+  const [yMin, yMax] = extent(points, d => d.y);
+  const yRange = yMax - yMin;
+  const yPad = yRange * 0.05 || Math.abs(yMin) * 0.05 || 1;
+  const yScale = scaleLinear()
+    .domain([yMin - yPad, yMax + yPad]).nice()
+    .range([innerH, 0]);
 
-  const svg = select(container)
-    .append('svg')
-    .attr('viewBox', `0 0 ${width} ${height}`)
-    .style('width', '100%')
-    .style('height', '100%')
-    .style('overflow', 'visible');
+  const xFmt = makeFmt(xFormat);
+  const yFmt = makeFmt(yFormat);
 
-  svg.append('defs').append('clipPath')
+  // d3.create produces a detached SVG element — Observable cell pattern.
+  // viewBox defines the coordinate system; CSS handles display sizing.
+  const svg = create('svg')
+    .attr('viewBox', [0, 0, width, height])
+    .style('max-width', '100%')
+    .style('height', 'auto')
+    .style('overflow', 'visible')
+    .style('font', '10px sans-serif');
+
+  svg.append('defs')
+    .append('clipPath')
     .attr('id', clipId)
     .append('rect')
     .attr('width', innerW)
     .attr('height', innerH);
 
   const g = svg.append('g')
-    .attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+    .attr('transform', `translate(${mLeft},${mTop})`);
 
   // ── Region bands (adaptive chart only) ──────────────────────────────────
   if (regions.length > 0) {
-    const logRegions = regions.filter((r) => r.type === 'log');
-    const isLeftLog  = logRegions.length > 0 && logRegions[0].range[0] < innerW * 0.5;
-    const isRightLog = logRegions.length > 0 && logRegions[logRegions.length - 1].range[1] > innerW * 0.5;
+    const logRegions = regions.filter(r => r.type === 'log');
+    const midX = innerW * 0.5;
+    const isLeftLog  = logRegions.length > 0 && logRegions[0].range[0] < midX;
 
     regions.forEach((region, i) => {
-      const x1 = region.range[0];
-      const x2 = region.range[1];
-      const w  = Math.max(0, x2 - x1);
-      const color = REGION_COLORS[region.type];
+      const [x1, x2] = region.range;
+      const w = Math.max(0, x2 - x1);
 
-      // Background band
       g.append('rect')
         .attr('x', x1).attr('width', w)
         .attr('y', 0).attr('height', innerH)
-        .attr('fill', color.fill);
+        .attr('fill', REGION_COLORS[region.type].fill);
 
-      // Section label at top of band
-      let labelKey;
-      if (region.type === 'log') {
-        labelKey = (i === 0 && isLeftLog) ? 'left_log' : 'right_log';
-      } else {
-        labelKey = 'linear';
-      }
+      const labelKey = region.type === 'log'
+        ? (i === 0 && isLeftLog ? 'left_log' : 'right_log')
+        : 'linear';
 
       g.append('text')
-        .attr('x', x1 + w / 2)
-        .attr('y', -10)
+        .attr('x', x1 + w / 2).attr('y', -10)
         .attr('text-anchor', 'middle')
-        .attr('fill', color.label)
+        .attr('fill', REGION_COLORS[region.type].label)
         .attr('font-size', '10px')
         .attr('font-weight', '500')
         .attr('letter-spacing', '0.05em')
@@ -119,100 +122,122 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
 
     // Boundary lines between regions
     for (let i = 0; i < regions.length - 1; i++) {
-      const bx = regions[i].range[1];
       g.append('line')
-        .attr('x1', bx).attr('x2', bx)
-        .attr('y1', -MARGIN.top).attr('y2', innerH)
+        .attr('x1', regions[i].range[1]).attr('x2', regions[i].range[1])
+        .attr('y1', -mTop).attr('y2', innerH)
         .attr('stroke', '#6040a0')
         .attr('stroke-width', 1.5)
         .attr('stroke-dasharray', '4,3');
     }
   }
 
-  // ── Y scale ─────────────────────────────────────────────────────────────
-  const yMin = min(points, (d) => d.y);
-  const yMax = max(points, (d) => d.y);
-  const yRange = yMax - yMin;
-  const yPad = yRange * 0.05 || Math.abs(yMin) * 0.05 || 1;
-  const yScale = scaleLinear()
-    .domain([yMin - yPad, yMax + yPad])
-    .range([innerH, 0])
-    .nice();
-
-  // ── Axes ─────────────────────────────────────────────────────────────────
+  // ── x-axis ───────────────────────────────────────────────────────────────
   g.append('g')
+    .attr('class', 'x-axis')
     .attr('transform', `translate(0,${innerH})`)
-    .call(
-      axisBottom(xScale)
-        .ticks(6)
-        .tickFormat(xScale.type === 'adaptive' ? xScale.tickFormat() : fmt)
-    )
-    .call((a) => {
-      a.selectAll('text')
-        .attr('fill', '#a0a0c0')
-        .attr('font-size', '10px');
-      a.selectAll('line,path').attr('stroke', '#3a3a6a');
-    });
+    .call(axisBottom(xScale).ticks(6).tickFormat(xFmt))
+    .call(a => a.select('.domain').attr('stroke', '#3a3a6a'))
+    .call(a => a.selectAll('.tick line').attr('stroke', '#3a3a6a'))
+    .call(a => a.selectAll('.tick text').attr('fill', '#a0a0c0').attr('font-size', '10px'));
 
+  // ── y-axis ───────────────────────────────────────────────────────────────
   g.append('g')
-    .call(axisLeft(yScale).ticks(5))
-    .call((a) => {
-      a.selectAll('text').attr('fill', '#a0a0c0').attr('font-size', '10px');
-      a.selectAll('line,path').attr('stroke', '#3a3a6a');
-    });
+    .attr('class', 'y-axis')
+    .call(axisLeft(yScale).ticks(5).tickFormat(yFmt))
+    .call(a => a.select('.domain').attr('stroke', '#3a3a6a'))
+    .call(a => a.selectAll('.tick line').attr('stroke', '#3a3a6a'))
+    .call(a => a.selectAll('.tick text').attr('fill', '#a0a0c0').attr('font-size', '10px'));
+
+  // ── SVG-internal tooltip ─────────────────────────────────────────────────
+  // Positioned using pointer(event, g.node()) — no DOM outside the SVG,
+  // compatible with Observable cells and any embedding context.
+  const tt = g.append('g')
+    .attr('class', 'tooltip')
+    .attr('pointer-events', 'none')
+    .style('display', 'none');
+
+  tt.append('rect')
+    .attr('class', 'tt-bg')
+    .attr('rx', 4)
+    .attr('fill', '#0d1a33')
+    .attr('stroke', '#3a3a6a')
+    .attr('stroke-width', 1);
+
+  tt.append('text').attr('class', 'tt-line1')
+    .attr('fill', '#e0e0f0').attr('font-size', '11px')
+    .attr('x', 8).attr('y', 17);
+
+  tt.append('text').attr('class', 'tt-line2')
+    .attr('fill', '#a0a0c0').attr('font-size', '11px')
+    .attr('x', 8).attr('y', 33);
 
   // ── Dots ─────────────────────────────────────────────────────────────────
   const dotOpacity = points.length > 500 ? 0.35 : points.length > 100 ? 0.55 : 0.8;
-  const dotRadius  = points.length > 500 ? 2 : 3;
-  const tt = getTooltip();
+  const r = points.length > 500 ? 2 : 3;
 
   g.append('g')
     .attr('clip-path', `url(#${clipId})`)
     .selectAll('circle')
     .data(points)
     .join('circle')
-    .attr('cx', (d) => xScale(d.x))
-    .attr('cy', (d) => yScale(d.y))
-    .attr('r', dotRadius)
-    .attr('fill', '#7070ff')
-    .attr('opacity', dotOpacity)
-    .on('mouseover', function (event, d) {
-      select(this).attr('r', dotRadius + 2).attr('fill', '#b0b0ff').attr('opacity', 1);
-      tt.html(`<b>${xLabel}</b>: ${fmt(d.x)}<br><b>${yLabel}</b>: ${fmt(d.y)}`)
-        .style('opacity', '1');
+      .attr('cx', d => xScale(d.x))
+      .attr('cy', d => yScale(d.y))
+      .attr('r', r)
+      .attr('fill', '#7070ff')
+      .attr('fill-opacity', dotOpacity)
+    .on('pointerenter', function(event, d) {
+      select(this).raise()
+        .attr('r', r + 2)
+        .attr('fill', '#b0b0ff')
+        .attr('fill-opacity', 1);
+
+      const line1 = `${xLabel}: ${xFmt(d.x)}`;
+      const line2 = `${yLabel}: ${yFmt(d.y)}`;
+      tt.select('.tt-line1').text(line1);
+      tt.select('.tt-line2').text(line2);
+
+      // Estimate width from character count — getComputedTextLength() requires
+      // the SVG to be in the live DOM; we use ~6.5px/char for 11px sans-serif.
+      const ttW = Math.max(line1.length, line2.length) * 6.5 + 16;
+      tt.select('.tt-bg').attr('width', ttW).attr('height', 46);
+
+      tt.style('display', null);
+      const [px, py] = pointer(event, g.node());
+      positionTooltip(px, py, ttW, 46);
     })
-    .on('mousemove', function (event) {
-      const ttNode = tt.node();
-      const ttW = ttNode.offsetWidth;
-      const ttH = ttNode.offsetHeight;
-      const x = event.clientX + ttW + 16 > window.innerWidth
-        ? event.clientX - ttW - 8
-        : event.clientX + 12;
-      const y = event.clientY - 28 < 0
-        ? event.clientY + 8
-        : event.clientY - ttH - 4;
-      tt.style('left', x + 'px').style('top', y + 'px');
+    .on('pointermove', function(event) {
+      const ttW = +tt.select('.tt-bg').attr('width') || 160;
+      const ttH = +tt.select('.tt-bg').attr('height') || 46;
+      const [px, py] = pointer(event, g.node());
+      positionTooltip(px, py, ttW, ttH);
     })
-    .on('mouseout', function () {
-      select(this).attr('r', dotRadius).attr('fill', '#7070ff').attr('opacity', dotOpacity);
-      tt.style('opacity', '0');
+    .on('pointerleave', function() {
+      select(this)
+        .attr('r', r)
+        .attr('fill', '#7070ff')
+        .attr('fill-opacity', dotOpacity);
+      tt.style('display', 'none');
     });
+
+  function positionTooltip(px, py, ttW, ttH) {
+    const tx = px + ttW + 12 > innerW ? px - ttW - 8 : px + 12;
+    const ty = py - ttH - 8 < 0      ? py + 8        : py - ttH - 8;
+    tt.attr('transform', `translate(${tx},${ty})`);
+  }
 
   // ── Axis labels ──────────────────────────────────────────────────────────
   g.append('text')
-    .attr('x', innerW / 2)
-    .attr('y', innerH + 44)
+    .attr('x', innerW / 2).attr('y', innerH + 44)
     .attr('text-anchor', 'middle')
-    .attr('fill', '#6060a0')
-    .attr('font-size', '11px')
+    .attr('fill', '#6060a0').attr('font-size', '11px')
     .text(xLabel);
 
   g.append('text')
     .attr('transform', 'rotate(-90)')
-    .attr('x', -innerH / 2)
-    .attr('y', -44)
+    .attr('x', -innerH / 2).attr('y', -44)
     .attr('text-anchor', 'middle')
-    .attr('fill', '#6060a0')
-    .attr('font-size', '11px')
+    .attr('fill', '#6060a0').attr('font-size', '11px')
     .text(yLabel);
+
+  return svg.node();
 }
