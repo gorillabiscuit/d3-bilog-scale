@@ -1,0 +1,17 @@
+# DEVLOG — d3-outlier-graphs
+
+Decision log for the article. Timestamped one-liners only.
+
+---
+
+- **[session-start]** Defined the core problem: 200 small business loans where 84% cluster under $10K but 10 outliers reach $1.2M, making a naive linear scale useless for the majority.
+- **[research]** Chose to research 21 techniques across four categories (scale-transform, visual-encoding, interaction, layout) before committing to any implementation.
+- **[research]** Rejected `d3-scale-break` plugin as a dependency: only 4 GitHub stars, pre-1.0, last pushed January 2023 — effectively unmaintained.
+- **[research]** Noted that `d3.density()` and `d3.kde()` do not exist in D3 v7 — violin plots require a hand-rolled kernel density estimator; the outline.yaml was incorrect on this point.
+- **[research]** Noted that `d3.facet()` does not exist in D3 v7 — it is an Observable Plot concept; raw D3 small multiples use `d3.group()` + per-tier SVGs.
+- **[research]** Cleveland's strongest recommendation for skewed data: log scale first, then full-panel break (small multiples) if log won't work — explicitly prefers this over a slashed/partial axis break.
+- **[research]** ECDF identified as the strongest literature-endorsed technique for reading exact outlier values (Cleveland, Wilke, Brooker) but currently underused in D3 tutorials.
+- **[research]** Symlog (`d3.scaleSymlog`) identified as the key differentiator among scale transforms: the only one that handles $0 and negative values natively, addressing Cleveland's "when log won't work" condition.
+- **[research]** d3-annotation (Susie Lu, 762★) confirmed as the canonical D3 approach for Tufte-style in-place outlier labeling; built for d3-v4 but works with v7, low-maintenance.
+- **[research]** Focus+Context (`@d3/focus-context`) confirmed as the strongest single fit for this dataset: context strip keeps $1.2M loan to-scale while focus pane decompresses the $0–$10K mass.
+- **[15:00]** Project scaffolded: Vite + D3 v7 + Vitest. Three-chart layout with dataset selector. Five test dataset generators with seeded PRNG (mulberry32). Scale architecture split into src/scale/ (pure math) and src/chart/ (DOM/D3).

@@ -1,0 +1,154 @@
+fields:
+  - name: technique_name
+    description: Short canonical name used as identifier
+    detail_level: brief
+
+  - name: category
+    description: >
+      One of: scale-transform | visual-encoding | interaction | layout
+    detail_level: brief
+
+  - name: distribution_driven
+    description: >
+      Whether the technique depends on the data's actual distribution
+      (quantile, ECDF, Winsorization, two-level histogram) vs. a fixed
+      mathematical function (log, pow, symlog). Key conceptual axis for
+      choosing by mental model.
+    detail_level: brief
+
+  - name: d3_api
+    description: >
+      Specific D3 v7 functions and scale constructors. Include full call
+      signatures and any chained methods (e.g. d3.scaleSymlog().constant(1)).
+      Note whether technique requires a plugin (d3fc, d3-annotation) or is
+      core D3.
+    detail_level: detailed
+
+  - name: library_dependency
+    description: >
+      Whether technique is: (a) core d3-scale / d3-shape, (b) requires a
+      plugin (d3fc, d3-annotation, d3-scale-break), or (c) uses Observable
+      Plot's built-in transforms (dodge for beeswarm). Affects bundle size
+      and long-term maintenance risk.
+    detail_level: moderate
+
+  - name: zero_negative_handling
+    description: >
+      How the technique handles zero or negative loan values (relevant for
+      net flows or loss data). scaleLog fails on ≤0; scaleSymlog and
+      scaleQuantile handle it; scalePow handles zero but not cleanly
+      negatives.
+    detail_level: moderate
+
+  - name: authority_verdict
+    description: >
+      Explicit recommendation or warning from canonical data viz authorities.
+      E.g. "Cleveland: prefer full-panel break over slashed-axis break."
+      "Tufte: label outliers in-place rather than rescaling."
+      Include book/paper name and chapter where possible.
+    detail_level: detailed
+    sources:
+      - Cleveland, W.S. "The Elements of Graphing Data" (1985/1994)
+      - Tufte, E.R. "The Visual Display of Quantitative Information" (1983)
+      - Wilkinson, L. "The Grammar of Graphics" (1999/2005)
+      - Shneiderman, B. "The Eyes Have It" (1996)
+
+  - name: tradeoffs
+    description: >
+      Known tradeoffs across three dimensions:
+      (1) Honesty — does the technique distort magnitude perception?
+      (2) Readability — can the dense $0–$10K region be read?
+      (3) User comprehension — does an untrained reader understand the encoding?
+    detail_level: detailed
+
+  - name: observable_urls
+    description: >
+      Specific Observable notebook URLs, D3 bl.ocks, or GitHub repos
+      demonstrating this technique. Include star/fork count and maintenance
+      status where known.
+    detail_level: detailed
+    known_exemplars:
+      - url: https://observablehq.com/@d3/focus-context
+        technique: focus-context
+        notes: Official D3 example; uses d3.dispatch to sync charts
+      - url: https://observablehq.com/@d3/focus-context/2
+        technique: focus-context
+        notes: v2 with updated join pattern
+      - url: https://observablehq.com/@harrystevens/force-directed-beeswarm
+        technique: beeswarm
+        notes: Force-simulation approach; widely referenced
+      - url: https://observablehq.com/@d3/beeswarm/2
+        technique: beeswarm
+        notes: Official D3 beeswarm example
+      - url: https://observablehq.com/@fil/experimental-plot-beeswarm
+        technique: beeswarm
+        notes: Observable Plot dodge transform approach
+      - url: https://observablehq.com/@angiehjort/understanding-d3-scalesymlog
+        technique: symlog-scale
+        notes: Explains constant parameter and linear region
+      - url: https://observablehq.com/@d3/quantile-quantize-and-threshold-scales
+        technique: quantile-scale
+        notes: Official comparison of quantile/quantize/threshold
+      - url: https://observablehq.com/@lukewhyte/handling-skewed-data-with-d3-scale-break
+        technique: scale-break-plugin
+        stars: 10
+        notes: Purpose-built for skewed financial data; low adoption
+      - url: https://d3-annotation.susielu.com/
+        technique: annotation-callout
+        stars: 726
+        notes: d3-annotation by Susie Lu; built for d3-v4, works with v7
+      - url: https://github.com/d3fc/d3fc/blob/master/packages/d3fc-discontinuous-scale/README.md
+        technique: broken-axis
+        notes: Financial origin (skip weekends); tick-clamping caveat
+      - url: https://observablehq.com/@d3/continuous-scales
+        technique: piecewise-scale
+        notes: Documents binary-search interpolation across domain breakpoints
+      - url: https://observablehq.com/@hydrosquall/d3-annotation-with-d3-line-chart
+        technique: annotation-callout
+        notes: d3-annotation + line chart integration example
+
+  - name: community_reception
+    description: >
+      How widely referenced or starred the technique's primary artifacts are.
+      Include GitHub stars, Observable forks, and whether it appears in curated
+      D3 galleries or is cited in tutorials.
+    detail_level: moderate
+
+  - name: code_complexity
+    description: >
+      Estimated implementation effort: low | medium | high.
+      Low = a single scale constructor swap.
+      Medium = custom rendering logic but no simulation.
+      High = force simulation, multi-panel coordination, or plugin integration.
+    detail_level: brief
+
+  - name: accessibility_support
+    description: >
+      How the technique exposes data to assistive technology. Options:
+      role="img" + aria-label on SVG container; per-mark <title>/aria-labelledby;
+      keyboard focusability of marks; visually-hidden data table fallback.
+      Note: visually-hidden table is the community-recommended fallback for
+      complex D3 charts.
+    detail_level: moderate
+    resources:
+      - https://fossheim.io/writing/posts/accessible-dataviz-d3-intro/
+      - https://www.a11ywithlindsey.com/blog/accessibility-d3-bar-charts/
+
+  - name: best_for
+    description: >
+      Primary use case for this specific dataset: 200 loans, 84% < $10K,
+      median $6K, 10 outliers up to $1.2M. When does this technique
+      outperform alternatives?
+    detail_level: moderate
+
+uncertain:
+  # Fields to fill during deep research phase
+  - technique_name: two-level-histogram
+    uncertain_field: d3_api
+    note: Binning algorithm from arXiv:2306.05786 — no reference D3 implementation exists yet
+  - technique_name: broken-axis
+    uncertain_field: d3_api
+    note: d3fc tick-clamping workaround needs hands-on verification
+  - technique_name: raincloud
+    uncertain_field: observable_urls
+    note: No canonical D3 raincloud notebook found; R/ggplot2 is the reference implementation

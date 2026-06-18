@@ -1,0 +1,127 @@
+topic: D3.js visualization techniques for outlier-heavy financial distributions
+description: >
+  200 small business loans. 84% under $10K, median ~$6K, but 10 loans range
+  from $120K–$1.2M. Goal: five interactive D3.js visualizations each taking a
+  different approach to the outlier distortion problem.
+
+items:
+  # --- Scale Transforms ---
+  - id: log-scale
+    name: Log Scale
+    category: scale-transform
+    d3_api: d3.scaleLog().base(10)
+
+  - id: pow-scale
+    name: Power / Square Root Scale
+    category: scale-transform
+    d3_api: d3.scalePow().exponent(0.5)
+
+  - id: symlog-scale
+    name: Symlog Scale
+    category: scale-transform
+    d3_api: d3.scaleSymlog().constant(c)
+
+  - id: piecewise-scale
+    name: Piecewise / Hybrid Scale
+    category: scale-transform
+    d3_api: continuous scale with >2 domain/range pairs (binary search interpolation)
+
+  - id: quantile-scale
+    name: Quantile / Rank Transform
+    category: scale-transform
+    d3_api: d3.scaleQuantile().domain(sample).range([...])
+    note: Distribution-driven, not function-driven. Robust to outliers by construction.
+
+  - id: scale-break-plugin
+    name: d3-scale-break Plugin
+    category: scale-transform
+    d3_api: external — @lukewhyte/d3-scale-break (Observable)
+    note: Scale-level break (compresses a gap at zero). Low adoption (~10★).
+
+  # --- Visual Encoding ---
+  - id: box-plot
+    name: Box Plot with Outlier Markers
+    category: visual-encoding
+    d3_api: d3.boxPlot (hand-rolled); d3.quantile(); outliers as circle marks
+
+  - id: violin-plot
+    name: Violin Plot
+    category: visual-encoding
+    d3_api: d3.density() / d3.kde(); d3.area() for mirrored shape
+
+  - id: beeswarm
+    name: Beeswarm / Strip Plot
+    category: visual-encoding
+    d3_api: d3.forceSimulation() + forceX + forceY + forceCollide(r)
+
+  - id: raincloud
+    name: Raincloud Plot
+    category: visual-encoding
+    d3_api: composite of violin + box + jittered strip (hand-rolled)
+    note: Community upgrade path from bare box plot; shows outlier vs. tail distinction.
+
+  - id: ecdf
+    name: ECDF / CCDF
+    category: visual-encoding
+    d3_api: d3.line() on sorted cumulative probabilities; CCDF on log-log axes
+    note: Strongest literature endorsement for reading exact outlier values.
+
+  - id: two-level-histogram
+    name: Two-Level Histogram
+    category: visual-encoding
+    d3_api: standard d3.bin() + d3.rect(); binning algorithm from arXiv:2306.05786
+    note: Log-split subsets with MDL-based sub-histograms; parameter-light.
+
+  # --- Interaction ---
+  - id: focus-context
+    name: Focus + Context (Overview + Detail)
+    category: interaction
+    d3_api: d3-brush + d3-zoom + d3.dispatch()
+
+  - id: semantic-zoom
+    name: Semantic Zooming
+    category: interaction
+    d3_api: d3-zoom; reveal detail at zoom levels without rescaling the domain
+
+  - id: linked-brushing
+    name: Linked Brushing
+    category: interaction
+    d3_api: d3-brush + d3.dispatch() to sync views
+
+  - id: animation-reveal
+    name: Animation-based Reveal
+    category: interaction
+    d3_api: d3.transition(); scale.domain() interpolation; d3-interpolate
+
+  - id: annotation-callout
+    name: Annotation-driven Outlier Callouts
+    category: interaction
+    d3_api: d3-annotation (Susie Lu, ~726★); annotationCalloutCircle / annotationCalloutRect
+    note: Static editorial annotation; Tufte-aligned. Complements Winsorization labeling.
+
+  # --- Layout ---
+  - id: broken-axis
+    name: Broken / Discontinuous Axis
+    category: layout
+    d3_api: "@d3fc/d3fc-discontinuous-scale (financial origin)"
+    note: Cleveland recommends FULL break (two panels) over partial slashed-axis break.
+
+  - id: winsorization
+    name: Winsorization (Cap + Label)
+    category: layout
+    d3_api: hand-rolled; cap domain at Nth percentile, annotate "≥ $X"
+
+  - id: inset-magnified
+    name: Inset / Magnified View
+    category: layout
+    d3_api: nested SVG or g transform; d3-zoom for the inset panel
+
+  - id: small-multiples
+    name: Small Multiples (Range Tiers)
+    category: layout
+    d3_api: d3.facet() pattern; separate SVG per tier; shared d3.scaleLinear()
+
+execution:
+  batch_size: 5
+  items_per_agent: 4
+  output_dir: ./results
