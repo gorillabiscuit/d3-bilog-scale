@@ -185,6 +185,8 @@ export function scaleAdaptive() {
       .data(_data.slice());
   };
 
+  scale.type = 'adaptive';
+
   // Returns region descriptors — useful for rendering compression indicators
   scale.regions = function () {
     return _regions.map((r) => ({ type: r.type, domain: r.domain, range: r.range, pixels: r.pixels }));

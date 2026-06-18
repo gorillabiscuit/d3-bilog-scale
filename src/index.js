@@ -36,4 +36,12 @@ function renderCharts() {
 datasetSelector.addEventListener('change', (e) => load(e.target.value));
 methodSelector.addEventListener('change', () => renderCharts());
 
+// Re-render when the browser is resized — debounced to avoid thrashing
+let _resizeTimer;
+const ro = new ResizeObserver(() => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(renderCharts, 120);
+});
+document.querySelectorAll('.chart-container').forEach((el) => ro.observe(el));
+
 load(datasetSelector.value);

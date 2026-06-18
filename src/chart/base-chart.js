@@ -1,4 +1,4 @@
-import { select, pointer } from 'd3-selection';
+import { select } from 'd3-selection';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { min, max } from 'd3-array';
@@ -25,6 +25,9 @@ function getTooltip() {
 }
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
+
+// Unique per-render counter — avoids id collisions when containers lack an id attribute
+let _clipCounter = 0;
 
 function fmt(v) {
   if (!Number.isFinite(v)) return '—';
@@ -53,21 +56,23 @@ const REGION_LABELS = {
  * options.regions — array from scaleAdaptive().regions(), used only for the adaptive chart.
  */
 export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 'y', regions = [] } = {}) {
-  const width = container.clientWidth || 800;
+  const width = container.clientWidth || 900;
   const height = container.clientHeight || 260;
   const innerW = width - MARGIN.left - MARGIN.right;
   const innerH = height - MARGIN.top - MARGIN.bottom;
+  const clipId = `clip-${++_clipCounter}`;
 
   select(container).selectAll('*').remove();
 
   const svg = select(container)
     .append('svg')
-    .attr('width', width)
-    .attr('height', height);
+    .attr('viewBox', `0 0 ${width} ${height}`)
+    .style('width', '100%')
+    .style('height', '100%')
+    .style('overflow', 'visible');
 
-  // Clip path keeps dots inside plot area
   svg.append('defs').append('clipPath')
-    .attr('id', `clip-${container.id}`)
+    .attr('id', clipId)
     .append('rect')
     .attr('width', innerW)
     .attr('height', innerH);
@@ -127,7 +132,8 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
   // ── Y scale ─────────────────────────────────────────────────────────────
   const yMin = min(points, (d) => d.y);
   const yMax = max(points, (d) => d.y);
-  const yPad = (yMax - yMin) * 0.05 || 1;
+  const yRange = yMax - yMin;
+  const yPad = yRange * 0.05 || Math.abs(yMin) * 0.05 || 1;
   const yScale = scaleLinear()
     .domain([yMin - yPad, yMax + yPad])
     .range([innerH, 0])
@@ -139,7 +145,7 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
     .call(
       axisBottom(xScale)
         .ticks(6)
-        .tickFormat(xScale.breakpointMethod ? xScale.tickFormat() : fmt)
+        .tickFormat(xScale.type === 'adaptive' ? xScale.tickFormat() : fmt)
     )
     .call((a) => {
       a.selectAll('text')
@@ -161,7 +167,7 @@ export function renderChart(container, points, xScale, { xLabel = 'x', yLabel = 
   const tt = getTooltip();
 
   g.append('g')
-    .attr('clip-path', `url(#clip-${container.id})`)
+    .attr('clip-path', `url(#${clipId})`)
     .selectAll('circle')
     .data(points)
     .join('circle')
