@@ -140,19 +140,27 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
     .attr('stroke', 'white').attr('stroke-opacity', 0.25)
     .attr('stroke-width', 1).attr('pointer-events', 'none');
 
+  // The power scale compresses gaps monotonically — once consecutive ticks are
+  // less than MIN_GAP pixels apart, all further steps will be even closer, so break.
+  const MIN_GAP = 2;
+
+  let prevPx = r1;
   let leftCursor = xLo - linearDomainWidth;
   while (leftCursor > xMin) {
     const px = xScale(leftCursor);
-    if (r1 - px < 1) break;
+    if (prevPx - px < MIN_GAP) break;
     drawTick(px);
+    prevPx = px;
     leftCursor -= linearDomainWidth;
   }
 
+  prevPx = r2;
   let rightCursor = xHi + linearDomainWidth;
   while (rightCursor < xMax) {
     const px = xScale(rightCursor);
-    if (px - r2 < 1) break;
+    if (px - prevPx < MIN_GAP) break;
     drawTick(px);
+    prevPx = px;
     rightCursor += linearDomainWidth;
   }
 

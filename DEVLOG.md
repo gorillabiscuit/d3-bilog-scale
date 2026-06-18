@@ -25,3 +25,4 @@ Decision log for the article. Timestamped one-liners only.
 - **[20:51]** Added distribution detection (skewness ratio test on log-transformed values) — USGS now auto-selects log scale and disables slider; NYC/SBA stay on piecewise
 - **[21:22]** Added KDE and mixture-model window detection as alternatives to quantile — dropdown lets user compare all three on the same data
 - **[23:15]** Fixed pixel-boundary jump: quantile method now derives r1/r2 from slider fraction directly; KDE/mixture use smoothFraction() (linear interpolation through sorted values) instead of discrete count
+- **[23:19]** Fixed runaway tick-line loop: break as soon as consecutive ticks are < 2px apart (power scale compresses monotonically, so first gap below threshold means all further gaps will be too)
