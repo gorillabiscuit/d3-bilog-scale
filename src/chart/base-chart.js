@@ -25,17 +25,6 @@ function makeFmt(specifier) {
   return specifier === 'currency' ? currencyFmt : format(specifier);
 }
 
-const REGION_COLORS = {
-  log:    { fill: '#2a1040', label: '#9060c0' },
-  linear: { fill: '#0d1a33', label: '#4060a0' },
-};
-
-const REGION_LABELS = {
-  left_log:  'left tail (log)',
-  linear:    'dense cluster (linear)',
-  right_log: 'right tail (log)',
-};
-
 /**
  * Create a scatterplot SVG node.
  *
@@ -48,21 +37,18 @@ const REGION_LABELS = {
  * @returns {SVGElement}
  */
 export function createChart(points, xScale, {
-  width       = 900,
-  height      = 260,
-  xLabel      = 'x',
-  yLabel      = 'y',
-  xFormat     = '~s',
-  yFormat     = '~s',
-  regions     = [],
-  showGridlines = false,
+  width   = 900,
+  height  = 260,
+  xLabel  = 'x',
+  yLabel  = 'y',
+  xFormat = '~s',
+  yFormat = '~s',
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
   const innerH = height - mTop  - mBot;
   const clipId = `clip-${++_clipId}`;
 
-  // Y scale — linear across all three chart variants
   const [yMin, yMax] = extent(points, d => d.y);
   const yRange = yMax - yMin;
   const yPad = yRange * 0.05 || Math.abs(yMin) * 0.05 || 1;
@@ -73,8 +59,6 @@ export function createChart(points, xScale, {
   const xFmt = makeFmt(xFormat);
   const yFmt = makeFmt(yFormat);
 
-  // d3.create produces a detached SVG element — Observable cell pattern.
-  // viewBox defines the coordinate system; CSS handles display sizing.
   const svg = create('svg')
     .attr('viewBox', [0, 0, width, height])
     .style('max-width', '100%')
@@ -91,66 +75,6 @@ export function createChart(points, xScale, {
 
   const g = svg.append('g')
     .attr('transform', `translate(${mLeft},${mTop})`);
-
-  // ── Region bands (adaptive chart only) ──────────────────────────────────
-  if (regions.length > 0) {
-    const logRegions = regions.filter(r => r.type === 'log');
-    const midX = innerW * 0.5;
-    const isLeftLog  = logRegions.length > 0 && logRegions[0].range[0] < midX;
-
-    regions.forEach((region, i) => {
-      const [x1, x2] = region.range;
-      const w = Math.max(0, x2 - x1);
-
-      g.append('rect')
-        .attr('x', x1).attr('width', w)
-        .attr('y', 0).attr('height', innerH)
-        .attr('fill', REGION_COLORS[region.type].fill);
-
-      const labelKey = region.type === 'log'
-        ? (i === 0 && isLeftLog ? 'left_log' : 'right_log')
-        : 'linear';
-
-      g.append('text')
-        .attr('x', x1 + w / 2).attr('y', -10)
-        .attr('text-anchor', 'middle')
-        .attr('fill', REGION_COLORS[region.type].label)
-        .attr('font-size', '10px')
-        .attr('font-weight', '500')
-        .attr('letter-spacing', '0.05em')
-        .text(REGION_LABELS[labelKey]);
-    });
-
-    // Boundary lines between regions
-    for (let i = 0; i < regions.length - 1; i++) {
-      g.append('line')
-        .attr('x1', regions[i].range[1]).attr('x2', regions[i].range[1])
-        .attr('y1', -mTop).attr('y2', innerH)
-        .attr('stroke', '#6040a0')
-        .attr('stroke-width', 1.5)
-        .attr('stroke-dasharray', '4,3');
-    }
-  }
-
-  // ── x gridlines ─────────────────────────────────────────────────────────
-  // Shares the same tickValues as the x-axis so gridlines and labels are
-  // guaranteed to align. tickSize(-innerH) draws lines upward into the plot.
-  if (showGridlines) {
-    g.append('g')
-      .attr('class', 'x-grid')
-      .attr('transform', `translate(0,${innerH})`)
-      .call(
-        axisBottom(xScale)
-          .tickValues(xScale.ticks())
-          .tickSize(-innerH)
-          .tickFormat('')
-      )
-      .call(a => a.select('.domain').remove())
-      .call(a => a.selectAll('.tick line')
-        .attr('stroke', '#3a3a6a')
-        .attr('stroke-opacity', 0.6)
-        .attr('stroke-dasharray', '2,4'));
-  }
 
   // ── x-axis ───────────────────────────────────────────────────────────────
   g.append('g')
@@ -170,8 +94,6 @@ export function createChart(points, xScale, {
     .call(a => a.selectAll('.tick text').attr('fill', '#a0a0c0').attr('font-size', '10px'));
 
   // ── SVG-internal tooltip ─────────────────────────────────────────────────
-  // Positioned using pointer(event, g.node()) — no DOM outside the SVG,
-  // compatible with Observable cells and any embedding context.
   const tt = g.append('g')
     .attr('class', 'tooltip')
     .attr('pointer-events', 'none')
@@ -217,8 +139,6 @@ export function createChart(points, xScale, {
       tt.select('.tt-line1').text(line1);
       tt.select('.tt-line2').text(line2);
 
-      // Estimate width from character count — getComputedTextLength() requires
-      // the SVG to be in the live DOM; we use ~6.5px/char for 11px sans-serif.
       const ttW = Math.max(line1.length, line2.length) * 6.5 + 16;
       tt.select('.tt-bg').attr('width', ttW).attr('height', 46);
 

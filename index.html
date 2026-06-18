@@ -96,12 +96,6 @@
       <option value="forbes">Forbes Global 2000 — revenue / profit</option>
       <option value="openalex">OpenAlex Citations — citation count / year</option>
     </select>
-    <label for="method-selector">Breakpoints:</label>
-    <select id="method-selector">
-      <option value="iqr">IQR (Tukey fences)</option>
-      <option value="log-iqr" selected>Log-IQR (IQR in log space)</option>
-      <option value="percentile">Percentile (P10 / P90)</option>
-    </select>
     <span id="status"></span>
   </header>
 
@@ -115,7 +109,7 @@
       <div id="chart-log" class="chart-container"></div>
     </div>
     <div class="chart-wrapper">
-      <h2>Adaptive piecewise scale</h2>
+      <h2>Experimental</h2>
       <div id="chart-adaptive" class="chart-container"></div>
     </div>
   </div>

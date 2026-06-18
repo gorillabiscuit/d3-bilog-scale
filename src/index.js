@@ -5,7 +5,6 @@ import { LOADERS }             from './data/loaders.js';
 
 const status          = document.getElementById('status');
 const datasetSelector = document.getElementById('dataset-selector');
-const methodSelector  = document.getElementById('method-selector');
 
 let currentDataset = null;
 
@@ -25,16 +24,13 @@ function renderCharts() {
   if (!currentDataset) return;
 
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
-  const method = methodSelector.value;
 
   const containers = {
-    linear:   document.getElementById('chart-linear'),
-    log:      document.getElementById('chart-log'),
-    adaptive: document.getElementById('chart-adaptive'),
+    linear:       document.getElementById('chart-linear'),
+    log:          document.getElementById('chart-log'),
+    experimental: document.getElementById('chart-adaptive'),
   };
 
-  // Each chart function returns svg.node() — no container mutation, Observable-compatible.
-  // replaceChildren() is the idiomatic DOM API for swapping a container's content.
   const opts = { xLabel, yLabel, xFormat, yFormat };
 
   containers.linear.replaceChildren(
@@ -43,13 +39,12 @@ function renderCharts() {
   containers.log.replaceChildren(
     createLogChart(points, { width: containers.log.clientWidth, ...opts })
   );
-  containers.adaptive.replaceChildren(
-    createAdaptiveChart(points, { width: containers.adaptive.clientWidth, method, ...opts })
+  containers.experimental.replaceChildren(
+    createAdaptiveChart(points, { width: containers.experimental.clientWidth, ...opts })
   );
 }
 
 datasetSelector.addEventListener('change', e => load(e.target.value));
-methodSelector.addEventListener('change', () => renderCharts());
 
 // Re-render on resize — debounced to avoid thrashing during drag
 let _resizeTimer;
