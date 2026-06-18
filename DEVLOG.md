@@ -26,3 +26,4 @@ Decision log for the article. Timestamped one-liners only.
 - **[21:22]** Added KDE and mixture-model window detection as alternatives to quantile — dropdown lets user compare all three on the same data
 - **[23:15]** Fixed pixel-boundary jump: quantile method now derives r1/r2 from slider fraction directly; KDE/mixture use smoothFraction() (linear interpolation through sorted values) instead of discrete count
 - **[23:19]** Fixed runaway tick-line loop: break as soon as consecutive ticks are < 2px apart (power scale compresses monotonically, so first gap below threshold means all further gaps will be too)
+- **[23:24]** Fixed inverted scale on KDE/Mixture/Quantile: 0.001×range clamp in windowQuantile was larger than the actual 25th percentile on USGS data (250k > 4), swapped xLo and xHi silently — replaced with 1e-9 epsilon

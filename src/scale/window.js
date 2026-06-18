@@ -27,16 +27,10 @@ function std(values, mu) {
 
 export function windowQuantile(values, slider) {
   const sorted = [...values].sort((a, b) => a - b);
-  const [xMin, xMax] = [sorted[0], sorted[sorted.length - 1]];
-  const xLo = Math.max(
-    xMin + (xMax - xMin) * 0.001,
-    quantile(sorted, Math.max(0, 0.5 - slider / 2)),
-  );
-  const xHi = Math.min(
-    xMax - (xMax - xMin) * 0.001,
-    quantile(sorted, Math.min(1, 0.5 + slider / 2)),
-  );
-  return { xLo, xHi };
+  return {
+    xLo: quantile(sorted, Math.max(0, 0.5 - slider / 2)),
+    xHi: quantile(sorted, Math.min(1, 0.5 + slider / 2)),
+  };
 }
 
 // ── KDE (Kernel Density Estimation) ──────────────────────────────────────────

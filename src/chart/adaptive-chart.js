@@ -79,8 +79,12 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
   const METHODS = { quantile: windowQuantile, kde: windowKDE, mixture: windowMixture };
   const { xLo: rawLo, xHi: rawHi } = (METHODS[windowMethod] ?? windowQuantile)(xValues, window);
 
-  const xLo = Math.max(xMin + (xMax - xMin) * 0.001, Math.min(rawLo, xMax - (xMax - xMin) * 0.002));
-  const xHi = Math.min(xMax - (xMax - xMin) * 0.001, Math.max(rawHi, xMin + (xMax - xMin) * 0.002));
+  // Clamp only to prevent zero-length sub-scales, not by a percentage of range
+  // (a percentage clamp breaks for datasets with extreme ranges like 1→250M).
+  const eps = (xMax - xMin) * 1e-9;
+  const xLo = Math.max(xMin + eps, Math.min(rawLo, xMax - 2 * eps));
+  const xHi = Math.min(xMax - eps, Math.max(rawHi, xMin + 2 * eps));
+  if (xLo >= xHi) return renderLog(points, { width, height, xFormat, ...options });
 
   // Pixel boundaries must change continuously as the slider moves.
   // Quantile: derive from the slider fraction directly — no data involved, always smooth.
@@ -140,27 +144,19 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
     .attr('stroke', 'white').attr('stroke-opacity', 0.25)
     .attr('stroke-width', 1).attr('pointer-events', 'none');
 
-  // The power scale compresses gaps monotonically — once consecutive ticks are
-  // less than MIN_GAP pixels apart, all further steps will be even closer, so break.
-  const MIN_GAP = 2;
-
-  let prevPx = r1;
   let leftCursor = xLo - linearDomainWidth;
   while (leftCursor > xMin) {
     const px = xScale(leftCursor);
-    if (prevPx - px < MIN_GAP) break;
+    if (r1 - px < 1) break;
     drawTick(px);
-    prevPx = px;
     leftCursor -= linearDomainWidth;
   }
 
-  prevPx = r2;
   let rightCursor = xHi + linearDomainWidth;
   while (rightCursor < xMax) {
     const px = xScale(rightCursor);
-    if (px - prevPx < MIN_GAP) break;
+    if (px - r2 < 1) break;
     drawTick(px);
-    prevPx = px;
     rightCursor += linearDomainWidth;
   }
 
