@@ -138,7 +138,13 @@
           <option value="piecewise">Piecewise (linear + tails)</option>
           <option value="log">Log</option>
         </select>
-        <label for="alpha-slider" style="margin-left:0.75rem">Linear window</label>
+        <label for="window-method" id="window-method-label" style="margin-left:0.75rem">Window</label>
+        <select id="window-method">
+          <option value="quantile">Quantile</option>
+          <option value="kde">KDE</option>
+          <option value="mixture">Mixture model</option>
+        </select>
+        <label for="alpha-slider" style="margin-left:0.75rem">Tightness</label>
         <input type="range" id="alpha-slider" min="0" max="1" step="any" value="0.5">
         <span class="alpha-readout" id="alpha-value">0.50</span>
         <span id="slider-hint" style="color:#6060a0">← narrower &nbsp;|&nbsp; wider →</span>

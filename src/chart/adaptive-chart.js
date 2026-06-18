@@ -1,17 +1,11 @@
 import { scalePow, scaleLinear, scaleLog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
-import { axisBottom } from 'd3-axis';
 import { format } from 'd3-format';
 import { createChart, MARGIN } from './base-chart.js';
 import { detectScaleType } from '../scale/detect.js';
+import { windowQuantile, windowKDE, windowMixture } from '../scale/window.js';
 
-function quantile(sorted, p) {
-  const i = Math.max(0, Math.min(sorted.length - 1, p * (sorted.length - 1)));
-  const lo = Math.floor(i);
-  const hi = Math.ceil(i);
-  return sorted[lo] + (i - lo) * (sorted[hi] - sorted[lo]);
-}
 
 function makeFmt(specifier) {
   if (specifier === 'currency') {
@@ -26,14 +20,21 @@ function makeFmt(specifier) {
   return format(specifier);
 }
 
-export function createAdaptiveChart(points, { width = 900, height = 260, window = 0.5, xFormat = '~s', mode, ...options } = {}) {
+export function createAdaptiveChart(points, {
+  width = 900, height = 260,
+  window = 0.5,
+  xFormat = '~s',
+  mode,
+  windowMethod = 'quantile',
+  ...options
+} = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 
   const resolvedMode = mode ?? detectScaleType(points.map(d => d.x));
 
   return resolvedMode === 'log'
     ? renderLog(points, { width, height, xFormat, ...options })
-    : renderPiecewise(points, { width, height, window, xFormat, ...options });
+    : renderPiecewise(points, { width, height, window, windowMethod, xFormat, ...options });
 }
 
 // ── Log mode ──────────────────────────────────────────────────────────────────
@@ -53,21 +54,24 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 
 // ── Piecewise mode ────────────────────────────────────────────────────────────
 
-function renderPiecewise(points, { width, height, window, xFormat, ...options }) {
-  const xFmt = makeFmt(xFormat);
+function renderPiecewise(points, { width, height, window, windowMethod, xFormat, ...options }) {
   const innerW = width  - MARGIN.left - MARGIN.right;
   const innerH = height - MARGIN.top  - MARGIN.bottom;
   const [xMin, xMax] = extent(points, d => d.x);
+  const xValues = points.map(d => d.x);
 
-  const sortedX = [...points.map(d => d.x)].sort((a, b) => a - b);
+  const METHODS = { quantile: windowQuantile, kde: windowKDE, mixture: windowMixture };
+  const { xLo: rawLo, xHi: rawHi } = (METHODS[windowMethod] ?? windowQuantile)(xValues, window);
 
-  const xLo = Math.max(xMin + (xMax - xMin) * 0.001,
-                       quantile(sortedX, Math.max(0, 0.5 - window / 2)));
-  const xHi = Math.min(xMax - (xMax - xMin) * 0.001,
-                       quantile(sortedX, Math.min(1, 0.5 + window / 2)));
+  const xLo = Math.max(xMin + (xMax - xMin) * 0.001, Math.min(rawLo, xMax - (xMax - xMin) * 0.002));
+  const xHi = Math.min(xMax - (xMax - xMin) * 0.001, Math.max(rawHi, xMin + (xMax - xMin) * 0.002));
 
-  const qLo = Math.max(0, 0.5 - window / 2);
-  const qHi = Math.min(1, 0.5 + window / 2);
+  // Pixel boundaries: for quantile we can derive from the fraction directly (smooth slider);
+  // for kde/mixture we derive from the data fraction that falls within the window.
+  const sorted = [...xValues].sort((a, b) => a - b);
+  const n = sorted.length;
+  const qLo = sorted.filter(v => v < xLo).length / n;
+  const qHi = sorted.filter(v => v <= xHi).length / n;
 
   const r0 = 0;
   const r1 = innerW * qLo;

@@ -7,6 +7,7 @@ import { LOADERS }             from './data/loaders.js';
 const status          = document.getElementById('status');
 const datasetSelector = document.getElementById('dataset-selector');
 const scaleMode       = document.getElementById('scale-mode');
+const windowMethod    = document.getElementById('window-method');
 const alphaSlider     = document.getElementById('alpha-slider');
 const alphaValue      = document.getElementById('alpha-value');
 const sliderHint      = document.getElementById('slider-hint');
@@ -17,6 +18,9 @@ function updateSliderState() {
   const isLog = scaleMode.value === 'log';
   alphaSlider.disabled = isLog;
   alphaSlider.style.opacity = isLog ? '0.3' : '1';
+  windowMethod.disabled = isLog;
+  windowMethod.style.opacity = isLog ? '0.3' : '1';
+  document.getElementById('window-method-label').style.opacity = isLog ? '0.3' : '1';
   sliderHint.textContent = isLog ? 'not applicable for log scale' : '← narrower  |  wider →';
 }
 
@@ -57,10 +61,11 @@ function renderExperimental() {
   const container = document.getElementById('chart-adaptive');
   container.replaceChildren(
     createAdaptiveChart(points, {
-      width:  container.clientWidth,
-      height: container.clientHeight,
-      mode:   scaleMode.value,
-      window: +alphaSlider.value,
+      width:        container.clientWidth,
+      height:       container.clientHeight,
+      mode:         scaleMode.value,
+      windowMethod: windowMethod.value,
+      window:       +alphaSlider.value,
       xLabel, yLabel, xFormat, yFormat,
     })
   );
@@ -69,6 +74,7 @@ function renderExperimental() {
 
 datasetSelector.addEventListener('change', e => load(e.target.value));
 scaleMode.addEventListener('change', renderExperimental);
+windowMethod.addEventListener('change', renderExperimental);
 
 let _raf = null;
 alphaSlider.addEventListener('input', () => {

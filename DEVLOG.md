@@ -23,3 +23,4 @@ Decision log for the article. Timestamped one-liners only.
 - **[19:15]** Added x-axis gridlines to adaptive chart using tickValues(xScale.ticks()) + tickSize(-innerH) — gridlines share exact positions with axis labels; the log-spaced crowding in the tails vs even linear spacing in the middle is now immediately visible.
 - **19:16** Replaced flat gridlines with semi-log paper ruling: lines at every integer multiple within each decade (1×–9×) mapped through a log sub-scale, producing visible bunching near each power of 10 — compression encoded as physical density rather than labelling.
 - **[20:51]** Added distribution detection (skewness ratio test on log-transformed values) — USGS now auto-selects log scale and disables slider; NYC/SBA stay on piecewise
+- **[21:22]** Added KDE and mixture-model window detection as alternatives to quantile — dropdown lets user compare all three on the same data
