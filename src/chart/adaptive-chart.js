@@ -1,7 +1,10 @@
-import { scalePow, scaleLinear } from 'd3-scale';
+import { scalePow, scaleLinear, scaleLog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
+import { axisBottom } from 'd3-axis';
+import { format } from 'd3-format';
 import { createChart, MARGIN } from './base-chart.js';
+import { detectScaleType } from '../scale/detect.js';
 
 function quantile(sorted, p) {
   const i = Math.max(0, Math.min(sorted.length - 1, p * (sorted.length - 1)));
@@ -10,24 +13,59 @@ function quantile(sorted, p) {
   return sorted[lo] + (i - lo) * (sorted[hi] - sorted[lo]);
 }
 
-export function createAdaptiveChart(points, { width = 900, height = 260, window = 0.5, ...options } = {}) {
+function makeFmt(specifier) {
+  if (specifier === 'currency') {
+    return v => {
+      const abs = Math.abs(v);
+      if (abs >= 1e9)  return `$${+(v / 1e9).toPrecision(3)}B`;
+      if (abs >= 1e6)  return `$${+(v / 1e6).toPrecision(3)}M`;
+      if (abs >= 1e3)  return `$${+(v / 1e3).toPrecision(3)}k`;
+      return `$${+v.toPrecision(3)}`;
+    };
+  }
+  return format(specifier);
+}
+
+export function createAdaptiveChart(points, { width = 900, height = 260, window = 0.5, xFormat = '~s', mode, ...options } = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 
+  const resolvedMode = mode ?? detectScaleType(points.map(d => d.x));
+
+  return resolvedMode === 'log'
+    ? renderLog(points, { width, height, xFormat, ...options })
+    : renderPiecewise(points, { width, height, window, xFormat, ...options });
+}
+
+// ── Log mode ──────────────────────────────────────────────────────────────────
+
+function renderLog(points, { width, height, xFormat, ...options }) {
+  const xFmt = makeFmt(xFormat);
+  const [xMin, xMax] = extent(points, d => d.x);
+  const innerW = width  - MARGIN.left - MARGIN.right;
+  const innerH = height - MARGIN.top  - MARGIN.bottom;
+
+  const xScale = scaleLog().domain([xMin, xMax]).range([0, innerW]).nice();
+
+  const node = createChart(points, xScale, { width, height, xFormat, ...options });
+
+  return node;
+}
+
+// ── Piecewise mode ────────────────────────────────────────────────────────────
+
+function renderPiecewise(points, { width, height, window, xFormat, ...options }) {
+  const xFmt = makeFmt(xFormat);
   const innerW = width  - MARGIN.left - MARGIN.right;
   const innerH = height - MARGIN.top  - MARGIN.bottom;
   const [xMin, xMax] = extent(points, d => d.x);
 
   const sortedX = [...points.map(d => d.x)].sort((a, b) => a - b);
 
-  // Clamp so neither boundary collapses onto the domain edge
   const xLo = Math.max(xMin + (xMax - xMin) * 0.001,
                        quantile(sortedX, Math.max(0, 0.5 - window / 2)));
   const xHi = Math.min(xMax - (xMax - xMin) * 0.001,
                        quantile(sortedX, Math.min(1, 0.5 + window / 2)));
 
-  // Pixel boundaries derived directly from the quantile fractions — continuous,
-  // so the boundary slides smoothly as the slider moves rather than jumping
-  // each time a data point crosses the threshold.
   const qLo = Math.max(0, 0.5 - window / 2);
   const qHi = Math.min(1, 0.5 + window / 2);
 
@@ -49,67 +87,46 @@ export function createAdaptiveChart(points, { width = 900, height = 260, window 
   xScale.range  = () => [0, innerW];
   xScale.copy   = () => xScale;
   xScale.ticks  = (count = 8) => {
-    const tl = qLo > 0    ? leftScale.ticks(Math.max(1, Math.round(count * qLo)))          : [];
-    const tm =               midScale.ticks(Math.max(1, Math.round(count * (qHi - qLo))))  ;
-    const tr = qHi < 1    ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qHi))))   : [];
+    const tl = qLo > 0 ? leftScale.ticks(Math.max(1, Math.round(count * qLo)))         : [];
+    const tm =            midScale.ticks(Math.max(1, Math.round(count * (qHi - qLo)))) ;
+    const tr = qHi < 1 ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qHi))))  : [];
     return [...tl, ...tm, ...tr];
   };
 
-  const node = createChart(points, xScale, { width, height, ...options });
-
+  const node = createChart(points, xScale, { width, height, xFormat, ...options });
   const g = select(node).select('g');
 
-  // White overlay on the linear region — lowered behind dots
+  // White overlay on linear region
   g.append('rect')
-      .attr('x', r1)
-      .attr('width', Math.max(0, r2 - r1))
-      .attr('y', 0)
-      .attr('height', innerH)
-      .attr('fill', 'white')
-      .attr('fill-opacity', 0.07)
+      .attr('x', r1).attr('width', Math.max(0, r2 - r1))
+      .attr('y', 0).attr('height', innerH)
+      .attr('fill', 'white').attr('fill-opacity', 0.07)
       .attr('pointer-events', 'none')
     .lower();
 
-  // Reference boxes: same domain width as the linear section, tiled across each
-  // tail. Because the tails are power-compressed, each successive box is narrower
-  // in pixels even though it spans the same domain distance — that shrinkage is
-  // the compression made visible.
+  // Tick lines at each linear-section-width interval into the tails
   const linearDomainWidth = xHi - xLo;
-  const refH = innerH * 0.2;
-  const refY = innerH - refH;
 
-  const drawRef = (x0px, widthPx) => g.append('rect')
-    .attr('x', x0px)
-    .attr('width', Math.max(0, widthPx))
-    .attr('y', refY)
-    .attr('height', refH)
-    .attr('fill', 'white')
-    .attr('fill-opacity', 0.08)
-    .attr('stroke', 'white')
-    .attr('stroke-opacity', 0.35)
-    .attr('stroke-width', 1)
-    .attr('pointer-events', 'none');
+  const drawTick = px => g.append('line')
+    .attr('x1', px).attr('x2', px)
+    .attr('y1', 0).attr('y2', innerH)
+    .attr('stroke', 'white').attr('stroke-opacity', 0.25)
+    .attr('stroke-width', 1).attr('pointer-events', 'none');
 
-  // Left tail: step leftward from xLo in linear-section-width increments
-  let leftCursor = xLo;
+  let leftCursor = xLo - linearDomainWidth;
   while (leftCursor > xMin) {
-    const next = Math.max(xMin, leftCursor - linearDomainWidth);
-    const px0 = xScale(next);
-    const px1 = xScale(leftCursor);
-    if (px1 - px0 < 1) break;
-    drawRef(px0, px1 - px0);
-    leftCursor = next;
+    const px = xScale(leftCursor);
+    if (r1 - px < 1) break;
+    drawTick(px);
+    leftCursor -= linearDomainWidth;
   }
 
-  // Right tail: step rightward from xHi in linear-section-width increments
-  let rightCursor = xHi;
+  let rightCursor = xHi + linearDomainWidth;
   while (rightCursor < xMax) {
-    const next = Math.min(xMax, rightCursor + linearDomainWidth);
-    const px0 = xScale(rightCursor);
-    const px1 = xScale(next);
-    if (px1 - px0 < 1) break;
-    drawRef(px0, px1 - px0);
-    rightCursor = next;
+    const px = xScale(rightCursor);
+    if (px - r2 < 1) break;
+    drawTick(px);
+    rightCursor += linearDomainWidth;
   }
 
   return node;

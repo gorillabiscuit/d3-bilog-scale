@@ -1,20 +1,33 @@
 import { createLinearChart }   from './chart/linear-chart.js';
 import { createLogChart }      from './chart/log-chart.js';
 import { createAdaptiveChart } from './chart/adaptive-chart.js';
+import { detectScaleType }     from './scale/detect.js';
 import { LOADERS }             from './data/loaders.js';
 
 const status          = document.getElementById('status');
 const datasetSelector = document.getElementById('dataset-selector');
+const scaleMode       = document.getElementById('scale-mode');
 const alphaSlider     = document.getElementById('alpha-slider');
 const alphaValue      = document.getElementById('alpha-value');
+const sliderHint      = document.getElementById('slider-hint');
 
 let currentDataset = null;
+
+function updateSliderState() {
+  const isLog = scaleMode.value === 'log';
+  alphaSlider.disabled = isLog;
+  alphaSlider.style.opacity = isLog ? '0.3' : '1';
+  sliderHint.textContent = isLog ? 'not applicable for log scale' : '← narrower  |  wider →';
+}
 
 async function load(datasetKey) {
   status.textContent = 'Loading…';
   try {
     currentDataset = await LOADERS[datasetKey]();
     status.textContent = `${currentDataset.points.length} points — ${currentDataset.description}`;
+    // Auto-detect and pre-select, but don't override a manual user choice
+    // (we reset on every dataset change since it's a new dataset)
+    scaleMode.value = detectScaleType(currentDataset.points.map(d => d.x));
     renderCharts();
   } catch (err) {
     status.textContent = `Failed to load: ${err.message}`;
@@ -26,25 +39,16 @@ function renderCharts() {
   if (!currentDataset) return;
 
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
-  const window = +alphaSlider.value;
-
-  const containers = {
-    linear:       document.getElementById('chart-linear'),
-    log:          document.getElementById('chart-log'),
-    experimental: document.getElementById('chart-adaptive'),
-  };
-
   const opts = { xLabel, yLabel, xFormat, yFormat };
 
-  containers.linear.replaceChildren(
-    createLinearChart(points, { width: containers.linear.clientWidth, height: containers.linear.clientHeight, ...opts })
-  );
-  containers.log.replaceChildren(
-    createLogChart(points, { width: containers.log.clientWidth, height: containers.log.clientHeight, ...opts })
-  );
-  containers.experimental.replaceChildren(
-    createAdaptiveChart(points, { width: containers.experimental.clientWidth, height: containers.experimental.clientHeight, window, ...opts })
-  );
+  const linearC = document.getElementById('chart-linear');
+  const logC    = document.getElementById('chart-log');
+  const adaptC  = document.getElementById('chart-adaptive');
+
+  linearC.replaceChildren(createLinearChart(points, { width: linearC.clientWidth, height: linearC.clientHeight, ...opts }));
+  logC.replaceChildren(createLogChart(points, { width: logC.clientWidth, height: logC.clientHeight, ...opts }));
+
+  renderExperimental();
 }
 
 function renderExperimental() {
@@ -55,13 +59,16 @@ function renderExperimental() {
     createAdaptiveChart(points, {
       width:  container.clientWidth,
       height: container.clientHeight,
+      mode:   scaleMode.value,
       window: +alphaSlider.value,
       xLabel, yLabel, xFormat, yFormat,
     })
   );
+  updateSliderState();
 }
 
 datasetSelector.addEventListener('change', e => load(e.target.value));
+scaleMode.addEventListener('change', renderExperimental);
 
 let _raf = null;
 alphaSlider.addEventListener('input', () => {

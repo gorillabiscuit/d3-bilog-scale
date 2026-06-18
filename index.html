@@ -133,10 +133,15 @@
     <div class="chart-wrapper">
       <h2>Experimental — power scale</h2>
       <div class="chart-controls">
-        <label for="alpha-slider">Linear window</label>
+        <label for="scale-mode">Scale</label>
+        <select id="scale-mode">
+          <option value="piecewise">Piecewise (linear + tails)</option>
+          <option value="log">Log</option>
+        </select>
+        <label for="alpha-slider" style="margin-left:0.75rem">Linear window</label>
         <input type="range" id="alpha-slider" min="0" max="1" step="any" value="0.5">
         <span class="alpha-readout" id="alpha-value">0.50</span>
-        <span style="color:#6060a0">← narrower &nbsp;|&nbsp; wider →</span>
+        <span id="slider-hint" style="color:#6060a0">← narrower &nbsp;|&nbsp; wider →</span>
       </div>
       <div id="chart-adaptive" class="chart-container"></div>
     </div>
