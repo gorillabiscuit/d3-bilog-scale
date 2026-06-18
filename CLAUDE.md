@@ -6,6 +6,31 @@ Five interactive D3.js visualizations, each taking a different approach to the s
 
 ---
 
+## Publication target: Observable
+
+**This code will be submitted to Observable.** That sets the quality bar.
+
+Observable is the canonical home for D3 work — Mike Bostock reads submissions. Every idiom, every pattern, every line of chart code must be the way the D3 community would write it, not a workable approximation.
+
+### What this means in practice
+
+- **Use `viewBox` + CSS sizing, never fixed `width`/`height` SVG attributes.** Observable notebooks are responsive by default.
+- **Follow the general update pattern.** `selectAll('*').remove()` is a nuclear option acceptable only for a one-shot static render. Any chart that responds to data changes must use `.join()` with proper enter/update/exit so transitions are possible.
+- **No `d3.mouse()` — it was removed in v6.** Use `pointer(event, element)` from `d3-selection` for element-relative coordinates.
+- **Margin convention is sacred.** `{top, right, bottom, left}` with `g.attr('transform', 'translate(margin.left, margin.top)')`. Do not deviate.
+- **Axes are styled via `.call()` chaining**, not manual attribute loops after the fact.
+- **Scales are pure math.** Never touch the DOM inside a scale. The scale layer has zero knowledge of SVG.
+- **Observable expects ES modules.** No CommonJS, no bundled imports, no `import * as d3`.
+- **Transitions belong on the chart, not the scale.** The scale returns numbers; D3 transitions interpolate between them.
+- **clipPath ids must be unique per chart instance** — Observable renders many cells simultaneously; a shared global id silently breaks clipping across cells.
+- **`ResizeObserver` is the correct pattern** for responsive charts in a browser context. Observable handles resize differently (cell re-execution) but the underlying principle is the same: never read `clientWidth` once and cache it forever.
+
+### Before every commit
+
+Ask: would this pass a Mike Bostock code review? If you are unsure whether a pattern is idiomatic, check the D3 source, Observable examples, or the D3 changelog for v5→v6→v7 migrations. Do not guess.
+
+---
+
 ## Process Capture Rules
 
 This project is being written up as an article. Capture the process as it happens.
