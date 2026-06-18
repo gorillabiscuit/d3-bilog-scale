@@ -48,13 +48,14 @@ const REGION_LABELS = {
  * @returns {SVGElement}
  */
 export function createChart(points, xScale, {
-  width   = 900,
-  height  = 260,
-  xLabel  = 'x',
-  yLabel  = 'y',
-  xFormat = '~s',
-  yFormat = '~s',
-  regions = [],
+  width       = 900,
+  height      = 260,
+  xLabel      = 'x',
+  yLabel      = 'y',
+  xFormat     = '~s',
+  yFormat     = '~s',
+  regions     = [],
+  showGridlines = false,
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
@@ -129,6 +130,26 @@ export function createChart(points, xScale, {
         .attr('stroke-width', 1.5)
         .attr('stroke-dasharray', '4,3');
     }
+  }
+
+  // ── x gridlines ─────────────────────────────────────────────────────────
+  // Shares the same tickValues as the x-axis so gridlines and labels are
+  // guaranteed to align. tickSize(-innerH) draws lines upward into the plot.
+  if (showGridlines) {
+    g.append('g')
+      .attr('class', 'x-grid')
+      .attr('transform', `translate(0,${innerH})`)
+      .call(
+        axisBottom(xScale)
+          .tickValues(xScale.ticks())
+          .tickSize(-innerH)
+          .tickFormat('')
+      )
+      .call(a => a.select('.domain').remove())
+      .call(a => a.selectAll('.tick line')
+        .attr('stroke', '#3a3a6a')
+        .attr('stroke-opacity', 0.6)
+        .attr('stroke-dasharray', '2,4'));
   }
 
   // ── x-axis ───────────────────────────────────────────────────────────────

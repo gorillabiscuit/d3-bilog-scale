@@ -15,6 +15,7 @@ export function createAdaptiveChart(points, { width = 900, method = 'iqr', ...op
   return createChart(safe, xScale, {
     width,
     ...options,
-    regions: xScale.regions(),
+    regions:       xScale.regions(),
+    showGridlines: true,
   });
 }
