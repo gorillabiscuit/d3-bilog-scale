@@ -51,8 +51,10 @@
       font-size: 0.8rem;
       color: #6060a0;
       margin-left: auto;
-      max-width: 220px;
-      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 280px;
     }
 
     .charts {
@@ -78,10 +80,30 @@
 
     .chart-container {
       width: 100%;
-      height: 260px;
+      height: 190px;
       background: #16213e;
       border: 1px solid #2a2a5a;
       border-radius: 6px;
+    }
+
+    .chart-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.8rem;
+      color: #a0a0c0;
+    }
+
+    .chart-controls input[type="range"] {
+      width: 200px;
+      accent-color: #7070ff;
+      cursor: pointer;
+    }
+
+    .alpha-readout {
+      font-variant-numeric: tabular-nums;
+      color: #e0e0f0;
+      min-width: 3ch;
     }
   </style>
 </head>
@@ -109,7 +131,13 @@
       <div id="chart-log" class="chart-container"></div>
     </div>
     <div class="chart-wrapper">
-      <h2>Experimental</h2>
+      <h2>Experimental — power scale</h2>
+      <div class="chart-controls">
+        <label for="alpha-slider">Linear window</label>
+        <input type="range" id="alpha-slider" min="0" max="1" step="any" value="0.5">
+        <span class="alpha-readout" id="alpha-value">0.50</span>
+        <span style="color:#6060a0">← narrower &nbsp;|&nbsp; wider →</span>
+      </div>
       <div id="chart-adaptive" class="chart-container"></div>
     </div>
   </div>

@@ -5,6 +5,8 @@ import { LOADERS }             from './data/loaders.js';
 
 const status          = document.getElementById('status');
 const datasetSelector = document.getElementById('dataset-selector');
+const alphaSlider     = document.getElementById('alpha-slider');
+const alphaValue      = document.getElementById('alpha-value');
 
 let currentDataset = null;
 
@@ -24,6 +26,7 @@ function renderCharts() {
   if (!currentDataset) return;
 
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
+  const window = +alphaSlider.value;
 
   const containers = {
     linear:       document.getElementById('chart-linear'),
@@ -34,19 +37,39 @@ function renderCharts() {
   const opts = { xLabel, yLabel, xFormat, yFormat };
 
   containers.linear.replaceChildren(
-    createLinearChart(points, { width: containers.linear.clientWidth, ...opts })
+    createLinearChart(points, { width: containers.linear.clientWidth, height: containers.linear.clientHeight, ...opts })
   );
   containers.log.replaceChildren(
-    createLogChart(points, { width: containers.log.clientWidth, ...opts })
+    createLogChart(points, { width: containers.log.clientWidth, height: containers.log.clientHeight, ...opts })
   );
   containers.experimental.replaceChildren(
-    createAdaptiveChart(points, { width: containers.experimental.clientWidth, ...opts })
+    createAdaptiveChart(points, { width: containers.experimental.clientWidth, height: containers.experimental.clientHeight, window, ...opts })
+  );
+}
+
+function renderExperimental() {
+  if (!currentDataset) return;
+  const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
+  const container = document.getElementById('chart-adaptive');
+  container.replaceChildren(
+    createAdaptiveChart(points, {
+      width:  container.clientWidth,
+      height: container.clientHeight,
+      window: +alphaSlider.value,
+      xLabel, yLabel, xFormat, yFormat,
+    })
   );
 }
 
 datasetSelector.addEventListener('change', e => load(e.target.value));
 
-// Re-render on resize — debounced to avoid thrashing during drag
+let _raf = null;
+alphaSlider.addEventListener('input', () => {
+  alphaValue.textContent = (+alphaSlider.value).toFixed(2);
+  if (_raf) cancelAnimationFrame(_raf);
+  _raf = requestAnimationFrame(() => { renderExperimental(); _raf = null; });
+});
+
 let _resizeTimer;
 const ro = new ResizeObserver(() => {
   clearTimeout(_resizeTimer);
