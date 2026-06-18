@@ -14,4 +14,5 @@ Decision log for the article. Timestamped one-liners only.
 - **[research]** Symlog (`d3.scaleSymlog`) identified as the key differentiator among scale transforms: the only one that handles $0 and negative values natively, addressing Cleveland's "when log won't work" condition.
 - **[research]** d3-annotation (Susie Lu, 762★) confirmed as the canonical D3 approach for Tufte-style in-place outlier labeling; built for d3-v4 but works with v7, low-maintenance.
 - **[research]** Focus+Context (`@d3/focus-context`) confirmed as the strongest single fit for this dataset: context strip keeps $1.2M loan to-scale while focus pane decompresses the $0–$10K mass.
+- **[17:49]** Scale core implemented: three-region piecewise (log-linear-log) with IQR and percentile breakpoint methods. All 28 tests passing: monotonicity, invertibility, boundary continuity, edge cases, graceful degradation, D3 compatibility.
 - **[15:00]** Project scaffolded: Vite + D3 v7 + Vitest. Three-chart layout with dataset selector. Five test dataset generators with seeded PRNG (mulberry32). Scale architecture split into src/scale/ (pure math) and src/chart/ (DOM/D3).

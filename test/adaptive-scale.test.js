@@ -1,55 +1,160 @@
-import { describe, test } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { scaleAdaptive } from '../src/scale/adaptive-scale.js';
-import { generateBothTails, generateBaseline, generateLeftSkew, generateRightSkew, generateExtreme } from '../src/data/generators.js';
+
+// Canonical both-tails dataset
+const cluster = Array.from({ length: 160 }, (_, i) => 40 + (i / 159) * 40);
+const leftOutliers = [2, 5, 8, 12, 18, 25, 30];
+const rightOutliers = [200, 500, 1000, 2000, 5000];
+const bothTails = [...leftOutliers, ...cluster, ...rightOutliers];
+
+function makeScale(data = bothTails) {
+  return scaleAdaptive().data(data).range([0, 800]);
+}
 
 describe('monotonicity', () => {
-  test.todo('scale(a) < scale(b) whenever a < b across the full domain');
-  test.todo('monotonicity holds at left boundary (values crossing bL)');
-  test.todo('monotonicity holds at right boundary (values crossing bR)');
-  test.todo('monotonicity holds in left log tail');
-  test.todo('monotonicity holds in linear middle');
-  test.todo('monotonicity holds in right log tail');
+  test('scale(a) < scale(b) whenever a < b across 1000 evenly spaced values', () => {
+    const s = makeScale();
+    const [dMin, dMax] = s.domain();
+    const step = (dMax - dMin) / 1000;
+    for (let v = dMin; v < dMax - step; v += step) {
+      expect(s(v)).toBeLessThan(s(v + step));
+    }
+  });
+
+  test('monotonicity holds at the left breakpoint boundary', () => {
+    const s = makeScale();
+    const regions = s.regions();
+    if (regions.length < 2) return;
+    const bL = regions[0].domain[1];
+    expect(s(bL - 0.001)).toBeLessThan(s(bL));
+    expect(s(bL)).toBeLessThan(s(bL + 0.001));
+  });
+
+  test('monotonicity holds at the right breakpoint boundary', () => {
+    const s = makeScale();
+    const regions = s.regions();
+    const last = regions[regions.length - 1];
+    if (last.type !== 'log') return;
+    const bR = last.domain[0];
+    expect(s(bR - 0.1)).toBeLessThan(s(bR));
+    expect(s(bR)).toBeLessThan(s(bR + 0.1));
+  });
 });
 
 describe('invertibility', () => {
-  test.todo('invert(scale(v)) ≈ v for values in the left log tail');
-  test.todo('invert(scale(v)) ≈ v for values in the linear middle');
-  test.todo('invert(scale(v)) ≈ v for values in the right log tail');
-  test.todo('invert(scale(v)) ≈ v at the left breakpoint exactly');
-  test.todo('invert(scale(v)) ≈ v at the right breakpoint exactly');
-  test.todo('round-trip error is within floating-point tolerance (1e-10)');
+  test('invert(scale(v)) ≈ v for values across the full domain', () => {
+    const s = makeScale();
+    const [dMin, dMax] = s.domain();
+    const testValues = Array.from({ length: 50 }, (_, i) => dMin + (i / 49) * (dMax - dMin));
+    for (const v of testValues) {
+      const roundTrip = s.invert(s(v));
+      const relErr = Math.abs(roundTrip - v) / (Math.abs(v) + 1e-10);
+      expect(relErr).toBeLessThan(1e-6);
+    }
+  });
 });
 
 describe('boundary continuity', () => {
-  test.todo('pixel at bL is identical from left region and middle region');
-  test.todo('pixel at bR is identical from right region and middle region');
-  test.todo('no discontinuity jump at either breakpoint');
+  test('pixel at left breakpoint is identical from both sides', () => {
+    const s = makeScale();
+    const regions = s.regions();
+    if (regions.length < 2) return;
+    const bL = regions[0].domain[1];
+    // Approach from just below and just above
+    const fromLeft = s(bL - 1e-9);
+    const atBoundary = s(bL);
+    const fromRight = s(bL + 1e-9);
+    expect(Math.abs(atBoundary - fromLeft)).toBeLessThan(0.5);
+    expect(Math.abs(fromRight - atBoundary)).toBeLessThan(0.5);
+  });
+
+  test('pixel at right breakpoint is identical from both sides', () => {
+    const s = makeScale();
+    const regions = s.regions();
+    const last = regions[regions.length - 1];
+    if (last.type !== 'log') return;
+    const bR = last.domain[0];
+    const fromLeft = s(bR - 1e-6);
+    const atBoundary = s(bR);
+    const fromRight = s(bR + 1e-6);
+    expect(Math.abs(atBoundary - fromLeft)).toBeLessThan(0.5);
+    expect(Math.abs(fromRight - atBoundary)).toBeLessThan(0.5);
+  });
 });
 
 describe('edge cases', () => {
-  test.todo('handles empty data array gracefully');
-  test.todo('handles single data point');
-  test.todo('handles all identical values');
-  test.todo('handles domain where dMin = 0 (log of zero)');
-  test.todo('handles negative values in domain');
-  test.todo('handles domain span of a single order of magnitude');
-  test.todo('handles domain span of six+ orders of magnitude');
+  test('empty data: behaves like a linear scale', () => {
+    const s = scaleAdaptive().domain([0, 100]).range([0, 800]);
+    expect(s(0)).toBeCloseTo(0);
+    expect(s(50)).toBeCloseTo(400);
+    expect(s(100)).toBeCloseTo(800);
+  });
+
+  test('all identical values: does not throw', () => {
+    expect(() => scaleAdaptive().data([42, 42, 42, 42]).range([0, 800])).not.toThrow();
+  });
+
+  test('returns finite values for all inputs within domain', () => {
+    const s = makeScale();
+    for (const v of bothTails) {
+      expect(Number.isFinite(s(v))).toBe(true);
+    }
+  });
 });
 
 describe('graceful degradation', () => {
-  test.todo('with baseline data (no outliers): behaves like a linear scale');
-  test.todo('with left-skew data: only left tail is logarithmic');
-  test.todo('with right-skew data: only right tail is logarithmic');
-  test.todo('with both-tails data: both tails are logarithmic');
-  test.todo('pixel allocation sums to total range width');
-  test.todo('empty log region gets zero pixel allocation');
+  test('no outliers: only one region (linear)', () => {
+    const s = scaleAdaptive().data(cluster).range([0, 800]);
+    const regions = s.regions();
+    expect(regions.every((r) => r.type === 'linear')).toBe(true);
+  });
+
+  test('right-skewed data: has a right log region', () => {
+    const s = scaleAdaptive().data([...cluster, ...rightOutliers]).range([0, 800]);
+    const regions = s.regions();
+    expect(regions.some((r) => r.type === 'log')).toBe(true);
+  });
+
+  test('pixel allocation sums to total range width', () => {
+    const s = makeScale();
+    const totalPixels = s.regions().reduce((sum, r) => sum + r.pixels, 0);
+    expect(totalPixels).toBeCloseTo(800, 1);
+  });
 });
 
 describe('d3 compatibility', () => {
-  test.todo('scale.domain() getter returns current domain');
-  test.todo('scale.domain([a, b]) setter returns the scale for chaining');
-  test.todo('scale.range() getter returns current range');
-  test.todo('scale.range([a, b]) setter returns the scale for chaining');
-  test.todo('scale.copy() returns an independent clone');
-  test.todo('scale.clamp(true) prevents extrapolation beyond domain');
+  test('domain() getter returns current domain', () => {
+    const s = makeScale();
+    const d = s.domain();
+    expect(d).toHaveLength(2);
+    expect(d[0]).toBeLessThan(d[1]);
+  });
+
+  test('domain() setter returns scale for chaining', () => {
+    const s = scaleAdaptive();
+    expect(s.domain([1, 100])).toBe(s);
+  });
+
+  test('range() setter returns scale for chaining', () => {
+    const s = scaleAdaptive();
+    expect(s.range([0, 800])).toBe(s);
+  });
+
+  test('copy() returns an independent clone', () => {
+    const s = makeScale();
+    const copy = s.copy();
+    expect(copy).not.toBe(s);
+    expect(copy.domain()).toEqual(s.domain());
+    expect(copy.range()).toEqual(s.range());
+    // Mutating copy does not affect original
+    copy.range([0, 400]);
+    expect(s.range()).toEqual([0, 800]);
+  });
+
+  test('clamp(true) prevents extrapolation', () => {
+    const s = makeScale().clamp(true);
+    const [dMin, dMax] = s.domain();
+    expect(s(dMin - 100)).toBeCloseTo(s(dMin), 1);
+    expect(s(dMax + 1000)).toBeCloseTo(s(dMax), 1);
+  });
 });

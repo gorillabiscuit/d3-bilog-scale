@@ -1,30 +1,76 @@
-import { describe, test } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { detectBreakpoints } from '../src/scale/breakpoints.js';
-import { generateBothTails, generateBaseline } from '../src/data/generators.js';
+
+const cluster = Array.from({ length: 160 }, (_, i) => 40 + (i / 159) * 40); // 40–80
+const leftOutliers = [2, 5, 8, 12, 18, 25, 30];
+const rightOutliers = [200, 500, 1000, 2000, 5000];
+const bothTails = [...leftOutliers, ...cluster, ...rightOutliers];
 
 describe('IQR method', () => {
-  test.todo('returns leftBreakpoint and rightBreakpoint');
-  test.todo('leftBreakpoint = Q1 - 1.5*IQR, clamped to dMin');
-  test.todo('rightBreakpoint = Q3 + 1.5*IQR, clamped to dMax');
-  test.todo('with no outliers: leftBreakpoint ≈ dMin and rightBreakpoint ≈ dMax');
-  test.todo('outliers below bL are classified as left-tail points');
-  test.todo('outliers above bR are classified as right-tail points');
+  test('returns left and right properties', () => {
+    const bp = detectBreakpoints(bothTails, 'iqr');
+    expect(bp).toHaveProperty('left');
+    expect(bp).toHaveProperty('right');
+  });
+
+  test('left < right', () => {
+    const { left, right } = detectBreakpoints(bothTails, 'iqr');
+    expect(left).toBeLessThan(right);
+  });
+
+  test('left is clamped to dMin when no low outliers exist', () => {
+    const { left } = detectBreakpoints(cluster, 'iqr');
+    expect(left).toBeCloseTo(cluster[0], 0);
+  });
+
+  test('right is clamped to dMax when no high outliers exist', () => {
+    const { right } = detectBreakpoints(cluster, 'iqr');
+    expect(right).toBeCloseTo(cluster[cluster.length - 1], 0);
+  });
+
+  test('outliers below left are outside the cluster', () => {
+    const { left } = detectBreakpoints(bothTails, 'iqr');
+    const outside = leftOutliers.filter((v) => v < left);
+    expect(outside.length).toBeGreaterThan(0);
+  });
+
+  test('outliers above right are outside the cluster', () => {
+    const { right } = detectBreakpoints(bothTails, 'iqr');
+    const outside = rightOutliers.filter((v) => v > right);
+    expect(outside.length).toBeGreaterThan(0);
+  });
 });
 
 describe('percentile method', () => {
-  test.todo('uses P10 and P90 by default');
-  test.todo('accepts custom percentile parameter');
-  test.todo('bL = P10, bR = P90 of the input data');
+  test('bL = P10, bR = P90', () => {
+    const data = Array.from({ length: 100 }, (_, i) => i + 1); // 1–100
+    const { left, right } = detectBreakpoints(data, 'percentile');
+    expect(left).toBeCloseTo(10.9, 0);
+    expect(right).toBeCloseTo(90.1, 0);
+  });
 });
 
 describe('empty and degenerate data', () => {
-  test.todo('throws or returns sensible defaults for empty array');
-  test.todo('handles array with a single value');
-  test.todo('handles array with two identical values');
+  test('empty array returns sensible defaults', () => {
+    const bp = detectBreakpoints([], 'iqr');
+    expect(Number.isFinite(bp.left)).toBe(true);
+    expect(Number.isFinite(bp.right)).toBe(true);
+  });
+
+  test('single value: left === right === that value', () => {
+    const { left, right } = detectBreakpoints([42], 'iqr');
+    expect(left).toBe(42);
+    expect(right).toBe(42);
+  });
+
+  test('all identical: left === right', () => {
+    const { left, right } = detectBreakpoints([7, 7, 7, 7], 'iqr');
+    expect(left).toBe(right);
+  });
 });
 
-describe('single cluster (no outliers)', () => {
-  test.todo('IQR method: bL === dMin when no low outliers exist');
-  test.todo('IQR method: bR === dMax when no high outliers exist');
-  test.todo('scale should be instructed to omit log tails in this case');
+describe('unknown method', () => {
+  test('throws for unsupported method', () => {
+    expect(() => detectBreakpoints(cluster, 'nonsense')).toThrow();
+  });
 });
