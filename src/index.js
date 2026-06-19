@@ -1,36 +1,24 @@
-import { createLinearChart }   from './chart/linear-chart.js';
-import { createLogChart }      from './chart/log-chart.js';
 import { createAdaptiveChart } from './chart/adaptive-chart.js';
-import { detectScaleType }     from './scale/detect.js';
 import { windowQuantile }      from './scale/window.js';
 import { LOADERS }             from './data/loaders.js';
 
 const status          = document.getElementById('status');
 const datasetSelector = document.getElementById('dataset-selector');
-const scaleMode       = document.getElementById('scale-mode');
 const alphaSlider     = document.getElementById('alpha-slider');
 const alphaValue      = document.getElementById('alpha-value');
-const sliderHint      = document.getElementById('slider-hint');
 
 let currentDataset = null;
-// Drag-handle overrides: null = use windowQuantile from slider; set on handle dragend
+// Drag-handle overrides: null = use slider-derived defaults; set on dragend
 let manualXLo = null, manualXHi = null;
-
-function updateSliderState() {
-  const isLog = scaleMode.value === 'log';
-  alphaSlider.disabled = isLog;
-  alphaSlider.style.opacity = isLog ? '0.3' : '1';
-  sliderHint.textContent = isLog ? 'not applicable for log scale' : '← narrower  |  wider →';
-}
+let manualQLo = null, manualQHi = null;
 
 async function load(datasetKey) {
   status.textContent = 'Loading…';
   try {
     currentDataset = await LOADERS[datasetKey]();
     status.textContent = `${currentDataset.points.length} points — ${currentDataset.description}`;
-    scaleMode.value = detectScaleType(currentDataset.points.map(d => d.x));
-    manualXLo = null;
-    manualXHi = null;
+    manualXLo = null; manualXHi = null;
+    manualQLo = null; manualQHi = null;
     renderCharts();
   } catch (err) {
     status.textContent = `Failed to load: ${err.message}`;
@@ -39,17 +27,6 @@ async function load(datasetKey) {
 }
 
 function renderCharts() {
-  if (!currentDataset) return;
-
-  const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
-  const opts = { xLabel, yLabel, xFormat, yFormat };
-
-  const linearC = document.getElementById('chart-linear');
-  const logC    = document.getElementById('chart-log');
-
-  linearC.replaceChildren(createLinearChart(points, { width: linearC.clientWidth, height: linearC.clientHeight, ...opts }));
-  logC.replaceChildren(createLogChart(points, { width: logC.clientWidth, height: logC.clientHeight, ...opts }));
-
   renderExperimental();
 }
 
@@ -70,48 +47,45 @@ function renderExperimental() {
   if (!currentDataset) return;
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
   const slider = +alphaSlider.value;
-  const mode   = scaleMode.value;
 
   const container = document.getElementById('chart-adaptive');
   container.replaceChildren(
     createAdaptiveChart(points, {
       width: container.clientWidth, height: container.clientHeight,
-      mode, window: slider,
+      mode: 'piecewise', window: slider,
       xLo: manualXLo ?? undefined,
       xHi: manualXHi ?? undefined,
-      onWindowDrag: mode === 'piecewise'
-        ? ({ xLo, xHi }) => updateRangeDisplay(xLo, xHi, xFormat)
-        : undefined,
-      onWindowChange: mode === 'piecewise'
-        ? ({ xLo, xHi }) => { manualXLo = xLo; manualXHi = xHi; renderExperimental(); }
-        : undefined,
+      qLo: manualQLo ?? undefined,
+      qHi: manualQHi ?? undefined,
+      onWindowDrag: ({ xLo, xHi }) => updateRangeDisplay(xLo, xHi, xFormat),
+      onWindowChange: ({ xLo, xHi, qLo, qHi }) => {
+            manualXLo = xLo; manualXHi = xHi;
+            if (qLo != null) manualQLo = qLo;
+            if (qHi != null) manualQHi = qHi;
+            renderExperimental();
+          },
       xLabel, yLabel, xFormat, yFormat,
     })
   );
 
   // Initialise range display from current state
   const rangeEl = document.getElementById('window-range');
-  if (rangeEl && mode === 'piecewise') {
+  if (rangeEl) {
     const values = points.map(d => d.x);
     const { xLo, xHi } = manualXLo != null && manualXHi != null
       ? { xLo: manualXLo, xHi: manualXHi }
       : windowQuantile(values, slider);
     updateRangeDisplay(xLo, xHi, xFormat);
-  } else if (rangeEl) {
-    rangeEl.textContent = '';
   }
-
-  updateSliderState();
 }
 
 datasetSelector.addEventListener('change', e => load(e.target.value));
-scaleMode.addEventListener('change', renderExperimental);
 
 let _raf = null;
 alphaSlider.addEventListener('input', () => {
   alphaValue.textContent = (+alphaSlider.value).toFixed(2);
-  manualXLo = null;
-  manualXHi = null;
+  manualXLo = null; manualXHi = null;
+  manualQLo = null; manualQHi = null;
   if (_raf) cancelAnimationFrame(_raf);
   _raf = requestAnimationFrame(() => { renderExperimental(); _raf = null; });
 });

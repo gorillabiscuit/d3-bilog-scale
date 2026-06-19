@@ -37,17 +37,20 @@ function makeFmt(specifier) {
  * @returns {SVGElement}
  */
 export function createChart(points, xScale, {
-  width   = 900,
-  height  = 260,
-  xLabel  = 'x',
-  yLabel  = 'y',
-  xFormat = '~s',
-  yFormat = '~s',
+  width        = 900,
+  height       = 260,
+  xLabel       = 'x',
+  yLabel       = 'y',
+  xFormat      = '~s',
+  yFormat      = '~s',
+  clipPadding,  // extra px around the plot area before clipping; defaults to dot radius
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
   const innerH = height - mTop  - mBot;
   const clipId = `clip-${++_clipId}`;
+  const r = points.length > 500 ? 2 : 3;
+  const pad = clipPadding ?? r;
 
   const [yMin, yMax] = extent(points, d => d.y);
   const yRange = yMax - yMin;
@@ -61,8 +64,8 @@ export function createChart(points, xScale, {
 
   const svg = create('svg')
     .attr('viewBox', [0, 0, width, height])
-    .style('max-width', '100%')
-    .style('height', 'auto')
+    .style('width', '100%')
+    .style('height', '100%')
     .style('overflow', 'visible')
     .style('font', '10px sans-serif');
 
@@ -70,8 +73,9 @@ export function createChart(points, xScale, {
     .append('clipPath')
     .attr('id', clipId)
     .append('rect')
-    .attr('width', innerW)
-    .attr('height', innerH);
+    .attr('x', -pad).attr('y', -pad)
+    .attr('width', innerW + 2 * pad)
+    .attr('height', innerH + 2 * pad);
 
   const g = svg.append('g')
     .attr('transform', `translate(${mLeft},${mTop})`);
@@ -116,7 +120,6 @@ export function createChart(points, xScale, {
 
   // ── Dots ─────────────────────────────────────────────────────────────────
   const dotOpacity = points.length > 500 ? 0.35 : points.length > 100 ? 0.55 : 0.8;
-  const r = points.length > 500 ? 2 : 3;
 
   g.append('g')
     .attr('clip-path', `url(#${clipId})`)
