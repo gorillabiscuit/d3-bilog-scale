@@ -83,9 +83,26 @@ datasetSelector.addEventListener('change', e => load(e.target.value));
 
 let _raf = null;
 alphaSlider.addEventListener('input', () => {
-  alphaValue.textContent = (+alphaSlider.value).toFixed(2);
-  manualXLo = null; manualXHi = null;
-  manualQLo = null; manualQHi = null;
+  const slider = +alphaSlider.value;
+  alphaValue.textContent = slider.toFixed(2);
+
+  // Pixel center: keep wherever the user panned to (default 0.5)
+  const qCenter = manualQLo != null ? (manualQLo + manualQHi) / 2 : 0.5;
+  manualQLo = Math.max(0, qCenter - slider / 2);
+  manualQHi = Math.min(1, qCenter + slider / 2);
+
+  // Domain: if the user has panned, preserve the domain center and only
+  // change the width using the same half-width windowQuantile would give
+  if (manualXLo != null && manualXHi != null && currentDataset) {
+    const domainCenter = (manualXLo + manualXHi) / 2;
+    const values = currentDataset.points.map(d => d.x);
+    const { xLo: refLo, xHi: refHi } = windowQuantile(values, slider);
+    const halfWidth = (refHi - refLo) / 2;
+    manualXLo = domainCenter - halfWidth;
+    manualXHi = domainCenter + halfWidth;
+  }
+  // If no pan has happened, manualXLo/XHi stay null and windowQuantile runs normally
+
   if (_raf) cancelAnimationFrame(_raf);
   _raf = requestAnimationFrame(() => { renderExperimental(); _raf = null; });
 });
