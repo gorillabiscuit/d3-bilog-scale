@@ -7,20 +7,15 @@ import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile, windowKDE, windowMixture } from '../scale/window.js';
 
 
-// Linear interpolation of where v sits in the sorted array, as a fraction [0,1].
-// Unlike a discrete count, this never jumps when a cluster of identical values
-// crosses the boundary — it glides through the cluster smoothly.
-function smoothFraction(sorted, v) {
-  const n = sorted.length;
-  if (v <= sorted[0]) return 0;
-  if (v >= sorted[n - 1]) return 1;
-  let lo = 0, hi = n - 1;
-  while (lo < hi - 1) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid] <= v) lo = mid; else hi = mid;
-  }
-  const t = (v - sorted[lo]) / (sorted[hi] - sorted[lo]);
-  return (lo + t) / (n - 1);
+// Maps a domain value to [0,1] proportional to its log-distance between xMin and xMax.
+// Log-space allocation is smooth by construction — no data-rank dependency, no cluster
+// jumps — and matches the visual intent of power-scale tails (compressing outliers
+// logarithmically, so log-space pixel allocation is the natural companion).
+function logFraction(xMin, xMax, v) {
+  if (xMin <= 0 || xMax <= xMin) return 0;
+  if (v <= xMin) return 0;
+  if (v >= xMax) return 1;
+  return Math.log(v / xMin) / Math.log(xMax / xMin);
 }
 
 function makeFmt(specifier) {
@@ -86,19 +81,10 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
   const xHi = Math.min(xMax - eps, Math.max(rawHi, xMin + 2 * eps));
   if (xLo >= xHi) return renderLog(points, { width, height, xFormat, ...options });
 
-  // Pixel boundaries must change continuously as the slider moves.
-  // Quantile: derive from the slider fraction directly — no data involved, always smooth.
-  // KDE/mixture: use interpolated fractional rank so a cluster of identical values
-  //   can't cause a step-change when xLo crosses them.
-  let qLo, qHi;
-  if (windowMethod === 'quantile' || !windowMethod) {
-    qLo = Math.max(0, 0.5 - window / 2);
-    qHi = Math.min(1, 0.5 + window / 2);
-  } else {
-    const sorted = [...xValues].sort((a, b) => a - b);
-    qLo = smoothFraction(sorted, xLo);
-    qHi = smoothFraction(sorted, xHi);
-  }
+  // Pixel boundaries in log-space: smooth by construction, no data-rank dependency.
+  // Log-space allocation is the natural companion to power-scale tails.
+  const qLo = logFraction(xMin, xMax, xLo);
+  const qHi = logFraction(xMin, xMax, xHi);
 
   const r0 = 0;
   const r1 = innerW * qLo;
