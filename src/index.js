@@ -90,18 +90,9 @@ alphaSlider.addEventListener('input', () => {
   const qCenter = manualQLo != null ? (manualQLo + manualQHi) / 2 : 0.5;
   manualQLo = Math.max(0, qCenter - slider / 2);
   manualQHi = Math.min(1, qCenter + slider / 2);
-
-  // Domain: if the user has panned, preserve the domain center and only
-  // change the width using the same half-width windowQuantile would give
-  if (manualXLo != null && manualXHi != null && currentDataset) {
-    const domainCenter = (manualXLo + manualXHi) / 2;
-    const values = currentDataset.points.map(d => d.x);
-    const { xLo: refLo, xHi: refHi } = windowQuantile(values, slider);
-    const halfWidth = (refHi - refLo) / 2;
-    manualXLo = domainCenter - halfWidth;
-    manualXHi = domainCenter + halfWidth;
-  }
-  // If no pan has happened, manualXLo/XHi stay null and windowQuantile runs normally
+  // Domain: leave manualXLo/XHi untouched.
+  // - If panned: the domain range stays fixed; slider only changes how much pixel space it occupies.
+  // - If not panned: manualXLo/XHi are null, so windowQuantile runs on next render as normal.
 
   if (_raf) cancelAnimationFrame(_raf);
   _raf = requestAnimationFrame(() => { renderExperimental(); _raf = null; });
