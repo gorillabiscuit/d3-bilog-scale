@@ -134,29 +134,19 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
     .lower();
 
   // Tick lines at each linear-section-width interval into the tails
-  const linearDomainWidth = xHi - xLo;
-
   const drawTick = px => g.append('line')
     .attr('x1', px).attr('x2', px)
     .attr('y1', 0).attr('y2', innerH)
     .attr('stroke', 'white').attr('stroke-opacity', 0.25)
     .attr('stroke-width', 1).attr('pointer-events', 'none');
 
-  let leftCursor = xLo - linearDomainWidth;
-  while (leftCursor > xMin) {
-    const px = xScale(leftCursor);
-    if (r1 - px < 1) break;
-    drawTick(px);
-    leftCursor -= linearDomainWidth;
-  }
-
-  let rightCursor = xHi + linearDomainWidth;
-  while (rightCursor < xMax) {
-    const px = xScale(rightCursor);
-    if (px - r2 < 1) break;
-    drawTick(px);
-    rightCursor += linearDomainWidth;
-  }
+  // scalePow.ticks(n) returns at most n nicely-spaced values — D3's own tick
+  // algorithm, the same one d3-axis uses. Budget ticks proportional to pixel space
+  // so a narrow tail gets 1–2 lines and a wide one gets up to 6.
+  const leftBudget  = Math.max(1, Math.round(6 * qLo));
+  const rightBudget = Math.max(1, Math.round(6 * (1 - qHi)));
+  leftScale.ticks(leftBudget).forEach(v   => drawTick(xScale(v)));
+  rightScale.ticks(rightBudget).forEach(v => drawTick(xScale(v)));
 
   return node;
 }
