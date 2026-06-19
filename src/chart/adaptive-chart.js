@@ -197,28 +197,45 @@ function renderPiecewise(points, {
         .attr('role', 'slider')
         .attr('aria-label', label);
 
-      // Invisible wide hit area for easy grabbing
+      // Invisible wide hit area so the grab target is easy to hit
       handle.append('rect')
         .attr('x', -8).attr('width', 16)
         .attr('y', 0).attr('height', innerH)
         .attr('fill', 'transparent');
 
-      // Visible boundary line
+      // Thin full-height boundary line
       handle.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-width', 1.5).attr('stroke-opacity', 0.5);
+        .attr('stroke', tickColor).attr('stroke-width', 1).attr('stroke-opacity', 0.3);
 
-      // Grip dots centred vertically
-      const mid = innerH / 2;
-      [-6, 0, 6].forEach(dy =>
-        handle.append('circle')
-          .attr('cy', mid + dy).attr('r', 1.5)
-          .attr('fill', tickColor).attr('fill-opacity', 0.5)
+      // Pill capsule centred vertically — the react-resizable-panels drag handle idiom
+      const pillW = 14, pillH = 36;
+      const pillY  = innerH / 2 - pillH / 2;
+      const pill = handle.append('rect')
+        .attr('x', -pillW / 2).attr('y', pillY)
+        .attr('width', pillW).attr('height', pillH)
+        .attr('rx', pillW / 2)          // fully rounded → capsule
+        .attr('fill', tickColor).attr('fill-opacity', 0.22);
+
+      // 2 × 3 grab-dot grid inside the pill
+      [-3.5, 3.5].forEach(cx =>
+        [-8, 0, 8].forEach(dy =>
+          handle.append('circle')
+            .attr('cx', cx).attr('cy', innerH / 2 + dy)
+            .attr('r', 1.5)
+            .attr('fill', tickColor).attr('fill-opacity', 0.6)
+        )
       );
 
-      // Highlight on hover or keyboard focus
-      handle.on('mouseenter focus', () => handle.select('line').attr('stroke-opacity', 1))
-            .on('mouseleave blur',  () => handle.select('line').attr('stroke-opacity', 0.5));
+      // Hover / focus: brighten pill + line
+      handle.on('mouseenter focus', () => {
+        pill.attr('fill-opacity', 0.55);
+        handle.select('line').attr('stroke-opacity', 0.6);
+      });
+      handle.on('mouseleave blur', () => {
+        pill.attr('fill-opacity', 0.22);
+        handle.select('line').attr('stroke-opacity', 0.3);
+      });
 
       return handle;
     }
