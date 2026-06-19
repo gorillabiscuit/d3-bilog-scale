@@ -2,7 +2,10 @@ import { createLinearChart }   from './chart/linear-chart.js';
 import { createLogChart }      from './chart/log-chart.js';
 import { createAdaptiveChart } from './chart/adaptive-chart.js';
 import { detectScaleType }     from './scale/detect.js';
+import { windowQuantile, windowKDE, windowMixture } from './scale/window.js';
 import { LOADERS }             from './data/loaders.js';
+
+const WINDOW_FNS = { quantile: windowQuantile, kde: windowKDE, mixture: windowMixture };
 
 const status          = document.getElementById('status');
 const datasetSelector = document.getElementById('dataset-selector');
@@ -58,17 +61,33 @@ function renderCharts() {
 function renderExperimental() {
   if (!currentDataset) return;
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
+  const slider = +alphaSlider.value;
+  const method = windowMethod.value;
+  const mode   = scaleMode.value;
+
   const container = document.getElementById('chart-adaptive');
   container.replaceChildren(
     createAdaptiveChart(points, {
-      width:        container.clientWidth,
-      height:       container.clientHeight,
-      mode:         scaleMode.value,
-      windowMethod: windowMethod.value,
-      window:       +alphaSlider.value,
+      width: container.clientWidth, height: container.clientHeight,
+      mode, windowMethod: method, window: slider,
       xLabel, yLabel, xFormat, yFormat,
     })
   );
+
+  // Show the actual window range so the user can see what domain is covered
+  const rangeEl = document.getElementById('window-range');
+  if (rangeEl && mode === 'piecewise') {
+    const values = points.map(d => d.x);
+    const winFn  = WINDOW_FNS[method] ?? windowQuantile;
+    const { xLo, xHi } = winFn(values, slider);
+    const fmt = xFormat === 'currency'
+      ? v => { const a=Math.abs(v); return a>=1e9?`$${+(v/1e9).toPrecision(3)}B`:a>=1e6?`$${+(v/1e6).toPrecision(3)}M`:a>=1e3?`$${+(v/1e3).toPrecision(3)}k`:`$${+v.toPrecision(3)}`; }
+      : v => { const a=Math.abs(v); return a>=1e9?`${+(v/1e9).toPrecision(3)}B`:a>=1e6?`${+(v/1e6).toPrecision(3)}M`:a>=1e3?`${+(v/1e3).toPrecision(3)}k`:`${+v.toPrecision(3)}`; };
+    rangeEl.textContent = `${fmt(xLo)} – ${fmt(xHi)}`;
+  } else if (rangeEl) {
+    rangeEl.textContent = '';
+  }
+
   updateSliderState();
 }
 

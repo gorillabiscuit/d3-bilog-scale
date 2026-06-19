@@ -133,20 +133,35 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
       .attr('pointer-events', 'none')
     .lower();
 
-  // Tick lines at each linear-section-width interval into the tails
+  // Tick lines mark each linear-window-width step into the tails, so the viewer
+  // can read how many "rulers" fit before the next gridline — the original intent.
+  // MAX_TAIL_TICKS prevents runaway on extreme-range datasets (e.g. USGS 1→250M
+  // with a tiny window would otherwise iterate hundreds of millions of steps).
+  const MAX_TAIL_TICKS = 6;
+
   const drawTick = px => g.append('line')
     .attr('x1', px).attr('x2', px)
     .attr('y1', 0).attr('y2', innerH)
     .attr('stroke', 'white').attr('stroke-opacity', 0.25)
     .attr('stroke-width', 1).attr('pointer-events', 'none');
 
-  // scalePow.ticks(n) returns at most n nicely-spaced values — D3's own tick
-  // algorithm, the same one d3-axis uses. Budget ticks proportional to pixel space
-  // so a narrow tail gets 1–2 lines and a wide one gets up to 6.
-  const leftBudget  = Math.max(1, Math.round(6 * qLo));
-  const rightBudget = Math.max(1, Math.round(6 * (1 - qHi)));
-  leftScale.ticks(leftBudget).forEach(v   => drawTick(xScale(v)));
-  rightScale.ticks(rightBudget).forEach(v => drawTick(xScale(v)));
+  const linearDomainWidth = xHi - xLo;
+  let leftCursor = xLo - linearDomainWidth, leftCount = 0;
+  while (leftCursor > xMin && leftCount < MAX_TAIL_TICKS) {
+    const px = xScale(leftCursor);
+    if (r1 - px < 1) break;
+    drawTick(px);
+    leftCursor -= linearDomainWidth;
+    leftCount++;
+  }
+  let rightCursor = xHi + linearDomainWidth, rightCount = 0;
+  while (rightCursor < xMax && rightCount < MAX_TAIL_TICKS) {
+    const px = xScale(rightCursor);
+    if (px - r2 < 1) break;
+    drawTick(px);
+    rightCursor += linearDomainWidth;
+    rightCount++;
+  }
 
   return node;
 }
