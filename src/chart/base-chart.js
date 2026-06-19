@@ -21,7 +21,8 @@ function currencyFmt(v) {
   return `$${+v.toPrecision(3)}`;
 }
 
-function makeFmt(specifier) {
+// Exported so adaptive-chart.js and index.js can share the same formatter.
+export function makeFmt(specifier) {
   return specifier === 'currency' ? currencyFmt : format(specifier);
 }
 
@@ -43,14 +44,27 @@ export function createChart(points, xScale, {
   yLabel       = 'y',
   xFormat      = '~s',
   yFormat      = '~s',
-  clipPadding,  // extra px around the plot area before clipping; defaults to dot radius
+  clipPadding,           // extra px around the plot area before clipping; defaults to dot radius
+  // --- appearance ---
+  dotColor          = '#7070ff',
+  dotRadius,             // undefined → auto-size by point count
+  dotOpacity,            // undefined → auto-size by density
+  axisColor         = '#3a3a6a',
+  axisTextColor     = '#a0a0c0',
+  labelColor        = '#6060a0',
+  tooltipBg         = '#0d1a33',
+  tooltipBorder     = '#3a3a6a',
+  tooltipTextColor  = '#e0e0f0',
+  tooltipTextMuted  = '#a0a0c0',
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
   const innerH = height - mTop  - mBot;
   const clipId = `clip-${++_clipId}`;
-  const r = points.length > 500 ? 2 : 3;
+  const r   = dotRadius  ?? (points.length > 500 ? 2 : 3);
   const pad = clipPadding ?? r;
+
+  const autoOpacity = dotOpacity ?? (points.length > 500 ? 0.35 : points.length > 100 ? 0.55 : 0.8);
 
   const [yMin, yMax] = extent(points, d => d.y);
   const yRange = yMax - yMin;
@@ -85,17 +99,17 @@ export function createChart(points, xScale, {
     .attr('class', 'x-axis')
     .attr('transform', `translate(0,${innerH})`)
     .call(axisBottom(xScale).ticks(6).tickFormat(xFmt))
-    .call(a => a.select('.domain').attr('stroke', '#3a3a6a'))
-    .call(a => a.selectAll('.tick line').attr('stroke', '#3a3a6a'))
-    .call(a => a.selectAll('.tick text').attr('fill', '#a0a0c0').attr('font-size', '10px'));
+    .call(a => a.select('.domain').attr('stroke', axisColor))
+    .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
+    .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
 
   // ── y-axis ───────────────────────────────────────────────────────────────
   g.append('g')
     .attr('class', 'y-axis')
     .call(axisLeft(yScale).ticks(5).tickFormat(yFmt))
-    .call(a => a.select('.domain').attr('stroke', '#3a3a6a'))
-    .call(a => a.selectAll('.tick line').attr('stroke', '#3a3a6a'))
-    .call(a => a.selectAll('.tick text').attr('fill', '#a0a0c0').attr('font-size', '10px'));
+    .call(a => a.select('.domain').attr('stroke', axisColor))
+    .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
+    .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
 
   // ── SVG-internal tooltip ─────────────────────────────────────────────────
   const tt = g.append('g')
@@ -106,21 +120,19 @@ export function createChart(points, xScale, {
   tt.append('rect')
     .attr('class', 'tt-bg')
     .attr('rx', 4)
-    .attr('fill', '#0d1a33')
-    .attr('stroke', '#3a3a6a')
+    .attr('fill', tooltipBg)
+    .attr('stroke', tooltipBorder)
     .attr('stroke-width', 1);
 
   tt.append('text').attr('class', 'tt-line1')
-    .attr('fill', '#e0e0f0').attr('font-size', '11px')
+    .attr('fill', tooltipTextColor).attr('font-size', '11px')
     .attr('x', 8).attr('y', 17);
 
   tt.append('text').attr('class', 'tt-line2')
-    .attr('fill', '#a0a0c0').attr('font-size', '11px')
+    .attr('fill', tooltipTextMuted).attr('font-size', '11px')
     .attr('x', 8).attr('y', 33);
 
   // ── Dots ─────────────────────────────────────────────────────────────────
-  const dotOpacity = points.length > 500 ? 0.35 : points.length > 100 ? 0.55 : 0.8;
-
   g.append('g')
     .attr('clip-path', `url(#${clipId})`)
     .selectAll('circle')
@@ -129,12 +141,12 @@ export function createChart(points, xScale, {
       .attr('cx', d => xScale(d.x))
       .attr('cy', d => yScale(d.y))
       .attr('r', r)
-      .attr('fill', '#7070ff')
-      .attr('fill-opacity', dotOpacity)
+      .attr('fill', dotColor)
+      .attr('fill-opacity', autoOpacity)
     .on('pointerenter', function(event, d) {
       select(this).raise()
         .attr('r', r + 2)
-        .attr('fill', '#b0b0ff')
+        .attr('fill', dotColor)
         .attr('fill-opacity', 1);
 
       const line1 = `${xLabel}: ${xFmt(d.x)}`;
@@ -158,8 +170,8 @@ export function createChart(points, xScale, {
     .on('pointerleave', function() {
       select(this)
         .attr('r', r)
-        .attr('fill', '#7070ff')
-        .attr('fill-opacity', dotOpacity);
+        .attr('fill', dotColor)
+        .attr('fill-opacity', autoOpacity);
       tt.style('display', 'none');
     });
 
@@ -173,14 +185,14 @@ export function createChart(points, xScale, {
   g.append('text')
     .attr('x', innerW / 2).attr('y', innerH + 44)
     .attr('text-anchor', 'middle')
-    .attr('fill', '#6060a0').attr('font-size', '11px')
+    .attr('fill', labelColor).attr('font-size', '11px')
     .text(xLabel);
 
   g.append('text')
     .attr('transform', 'rotate(-90)')
     .attr('x', -innerH / 2).attr('y', -44)
     .attr('text-anchor', 'middle')
-    .attr('fill', '#6060a0').attr('font-size', '11px')
+    .attr('fill', labelColor).attr('font-size', '11px')
     .text(yLabel);
 
   return svg.node();

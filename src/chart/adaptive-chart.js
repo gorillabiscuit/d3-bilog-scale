@@ -2,23 +2,9 @@ import { scalePow, scaleLinear, scaleLog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
-import { format } from 'd3-format';
-import { createChart, MARGIN } from './base-chart.js';
+import { createChart, makeFmt, MARGIN } from './base-chart.js';
 import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile } from '../scale/window.js';
-
-function makeFmt(specifier) {
-  if (specifier === 'currency') {
-    return v => {
-      const abs = Math.abs(v);
-      if (abs >= 1e9)  return `$${+(v / 1e9).toPrecision(3)}B`;
-      if (abs >= 1e6)  return `$${+(v / 1e6).toPrecision(3)}M`;
-      if (abs >= 1e3)  return `$${+(v / 1e3).toPrecision(3)}k`;
-      return `$${+v.toPrecision(3)}`;
-    };
-  }
-  return format(specifier);
-}
 
 export function createAdaptiveChart(points, {
   width = 900, height = 260,
@@ -31,6 +17,9 @@ export function createAdaptiveChart(points, {
   qHi: qHiOverride,    // explicit pixel fraction [0,1] for r2; undefined = use slider
   onWindowDrag,        // callback({ xLo, xHi }) fired on every drag move (lightweight)
   onWindowChange,      // callback({ xLo, xHi, qLo?, qHi? }) fired on dragend (triggers re-render)
+  tailTicks = 6,       // max ruler lines in each tail
+  overlayColor = 'white',
+  tickColor = 'white',
   ...options
 } = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -42,6 +31,7 @@ export function createAdaptiveChart(points, {
     : renderPiecewise(points, {
         width, height, window, xFormat,
         xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
+        tailTicks, overlayColor, tickColor,
         ...options,
       });
 }
@@ -62,6 +52,7 @@ const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 function renderPiecewise(points, {
   width, height, window, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
+  tailTicks, overlayColor, tickColor,
   ...options
 }) {
   const innerW = width  - MARGIN.left - MARGIN.right;
@@ -122,40 +113,39 @@ function renderPiecewise(points, {
   const node = createChart(points, xScale, { width, height, xFormat, ...options });
   const g = select(node).select('g');
 
-  // White overlay on linear region — lowered below dots so dots still get pointer
+  // Overlay on linear region — lowered below dots so dots still get pointer
   // events for tooltips. Drag is attached here so clicks on empty space in the
   // linear region trigger the pan while clicks on dots reach the dot handlers.
   const overlay = g.append('rect')
       .attr('x', r1).attr('width', Math.max(0, r2 - r1))
       .attr('y', 0).attr('height', innerH)
-      .attr('fill', 'white').attr('fill-opacity', 0.07)
+      .attr('fill', overlayColor).attr('fill-opacity', 0.07)
       .style('cursor', 'grab')
     .lower();
 
   // Ruler tick lines: one linear-window-width step into each tail
   // Kept in a dedicated group so they can be cleared and redrawn during drag.
-  const MAX_TAIL_TICKS = 6;
   const tickGroup = g.append('g').attr('pointer-events', 'none');
 
   function redrawTicks(lo, hi, scaleFn, p1, p2) {
     tickGroup.selectAll('line').remove();
     const step = hi - lo;
     let lc = lo - step, ln = 0;
-    while (lc > xMin && ln < MAX_TAIL_TICKS) {
+    while (lc > xMin && ln < tailTicks) {
       const px = scaleFn(lc);
       if (p1 - px < 1) break;
       tickGroup.append('line')
         .attr('x1', px).attr('x2', px).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', 'white').attr('stroke-opacity', 0.25).attr('stroke-width', 1);
+        .attr('stroke', tickColor).attr('stroke-opacity', 0.25).attr('stroke-width', 1);
       lc -= step; ln++;
     }
     let rc = hi + step, rn = 0;
-    while (rc < xMax && rn < MAX_TAIL_TICKS) {
+    while (rc < xMax && rn < tailTicks) {
       const px = scaleFn(rc);
       if (px - p2 < 1) break;
       tickGroup.append('line')
         .attr('x1', px).attr('x2', px).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', 'white').attr('stroke-opacity', 0.25).attr('stroke-width', 1);
+        .attr('stroke', tickColor).attr('stroke-opacity', 0.25).attr('stroke-width', 1);
       rc += step; rn++;
     }
   }
@@ -206,14 +196,14 @@ function renderPiecewise(points, {
       // Visible boundary line
       handle.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', 'white').attr('stroke-width', 1.5).attr('stroke-opacity', 0.5);
+        .attr('stroke', tickColor).attr('stroke-width', 1.5).attr('stroke-opacity', 0.5);
 
       // Grip dots centred vertically
       const mid = innerH / 2;
       [-6, 0, 6].forEach(dy =>
         handle.append('circle')
           .attr('cy', mid + dy).attr('r', 1.5)
-          .attr('fill', 'white').attr('fill-opacity', 0.5)
+          .attr('fill', tickColor).attr('fill-opacity', 0.5)
       );
 
       // Highlight on hover
