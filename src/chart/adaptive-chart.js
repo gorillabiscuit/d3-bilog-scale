@@ -109,6 +109,9 @@ function renderPiecewise(points, {
     if (p <= r2) return midScale.invert(p);
     return rightScale.invert(p);
   };
+  // d3-axis calls scale.tickFormat(count, specifier) when no explicit formatter is set.
+  // Delegate to the linear mid-section — it determines the "natural" numeric precision.
+  xScale.tickFormat = (count, specifier) => midScale.tickFormat(count, specifier);
 
   const node = createChart(points, xScale, { width, height, xFormat, ...options });
   const g = select(node).select('g');
@@ -121,6 +124,9 @@ function renderPiecewise(points, {
       .attr('y', 0).attr('height', innerH)
       .attr('fill', overlayColor).attr('fill-opacity', 0.07)
       .style('cursor', 'grab')
+      .attr('tabindex', '0')
+      .attr('role', 'slider')
+      .attr('aria-label', 'Pan linear section — arrow keys to move, Shift for larger steps')
     .lower();
 
   // Ruler tick lines: one linear-window-width step into each tail
@@ -182,10 +188,14 @@ function renderPiecewise(points, {
     }
 
     function makeHandle(initialPx, side) {
+      const label = side === 'left' ? 'Left boundary — arrow keys to move' : 'Right boundary — arrow keys to move';
       const handle = g.append('g')
         .attr('class', `handle handle-${side}`)
         .attr('transform', `translate(${initialPx},0)`)
-        .style('cursor', 'ew-resize');
+        .style('cursor', 'ew-resize')
+        .attr('tabindex', '0')
+        .attr('role', 'slider')
+        .attr('aria-label', label);
 
       // Invisible wide hit area for easy grabbing
       handle.append('rect')
@@ -206,9 +216,9 @@ function renderPiecewise(points, {
           .attr('fill', tickColor).attr('fill-opacity', 0.5)
       );
 
-      // Highlight on hover
-      handle.on('mouseenter', () => handle.select('line').attr('stroke-opacity', 1))
-            .on('mouseleave', () => handle.select('line').attr('stroke-opacity', 0.5));
+      // Highlight on hover or keyboard focus
+      handle.on('mouseenter focus', () => handle.select('line').attr('stroke-opacity', 1))
+            .on('mouseleave blur',  () => handle.select('line').attr('stroke-opacity', 0.5));
 
       return handle;
     }
@@ -254,6 +264,59 @@ function renderPiecewise(points, {
 
     leftHandle  = makeHandle(r1, 'left');
     rightHandle = makeHandle(r2, 'right');
+
+    // Keyboard step: 5px normal, 2% of chart width with Shift
+    const kbStep = event => event.shiftKey ? innerW * 0.02 : 5;
+
+    leftHandle.on('keydown', event => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const dir = event.key === 'ArrowRight' ? 1 : -1;
+      const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, currentR1 + dir * kbStep(event)));
+      // Treat left-boundary drag the same way the mouse drag does:
+      // applyLeftDrag rebuilds scales live; then commit via onWindowChange.
+      // We synthesise finalR1 here so the dragend path is consistent.
+      finalR1 = px;
+      currentXLo = applyLeftDrag(px);
+      leftHandle.attr('transform', `translate(${px},0)`)
+                .attr('aria-valuenow', currentXLo);
+      currentR1 = px;
+      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: px / innerW, qHi: currentR2 / innerW });
+    });
+
+    rightHandle.on('keydown', event => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const dir = event.key === 'ArrowRight' ? 1 : -1;
+      const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, currentR2 + dir * kbStep(event)));
+      finalR2 = px;
+      currentXHi = applyRightDrag(px);
+      rightHandle.attr('transform', `translate(${px},0)`)
+                 .attr('aria-valuenow', currentXHi);
+      currentR2 = px;
+      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: px / innerW });
+    });
+
+    overlay.on('keydown', event => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const dir = event.key === 'ArrowRight' ? 1 : -1;
+      const newR1 = Math.max(r0, Math.min(r3 - boxW, currentR1 + dir * kbStep(event)));
+      const newR2 = newR1 + boxW;
+      const newXLo = xScale.invert(newR1);
+      const newXHi = xScale.invert(newR2);
+      const s = buildScales(newXLo, newXHi, newR1, newR2);
+      const liveScale = v => v <= newXLo ? s.leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
+      circles.attr('cx', d => liveScale(d.x));
+      overlay.attr('x', newR1).attr('width', boxW);
+      leftHandle?.attr('transform', `translate(${newR1},0)`);
+      rightHandle?.attr('transform', `translate(${newR2},0)`);
+      redrawTicks(newXLo, newXHi, liveScale, newR1, newR2);
+      onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
+      currentXLo = newXLo; currentXHi = newXHi;
+      currentR1 = newR1;   currentR2 = newR2;
+      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+    });
 
     let finalR1 = r1, finalR2 = r2;
 
