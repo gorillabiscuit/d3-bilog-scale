@@ -127,6 +127,7 @@ function renderPiecewise(points, {
       .attr('tabindex', '0')
       .attr('role', 'slider')
       .attr('aria-label', 'Pan linear section — arrow keys to move, Shift for larger steps')
+      .style('outline', 'none')
     .lower();
 
   // Ruler tick lines: one linear-window-width step into each tail
@@ -193,6 +194,7 @@ function renderPiecewise(points, {
         .attr('class', `handle handle-${side}`)
         .attr('transform', `translate(${initialPx},0)`)
         .style('cursor', 'ew-resize')
+        .style('outline', 'none')   // suppress browser focus ring; pill provides the visual
         .attr('tabindex', '0')
         .attr('role', 'slider')
         .attr('aria-label', label);
@@ -209,7 +211,7 @@ function renderPiecewise(points, {
         .attr('stroke', tickColor).attr('stroke-width', 1).attr('stroke-opacity', 0.3);
 
       // Pill capsule centred vertically — the react-resizable-panels drag handle idiom
-      const pillW = 14, pillH = 36;
+      const pillW = 8, pillH = 20;
       const pillY  = innerH / 2 - pillH / 2;
       const pill = handle.append('rect')
         .attr('x', -pillW / 2).attr('y', pillY)
@@ -218,11 +220,11 @@ function renderPiecewise(points, {
         .attr('fill', tickColor).attr('fill-opacity', 0.22);
 
       // 2 × 3 grab-dot grid inside the pill
-      [-3.5, 3.5].forEach(cx =>
-        [-8, 0, 8].forEach(dy =>
+      [-2, 2].forEach(cx =>
+        [-5, 0, 5].forEach(dy =>
           handle.append('circle')
             .attr('cx', cx).attr('cy', innerH / 2 + dy)
-            .attr('r', 1.5)
+            .attr('r', 1)
             .attr('fill', tickColor).attr('fill-opacity', 0.6)
         )
       );
