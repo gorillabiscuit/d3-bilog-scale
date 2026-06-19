@@ -81,10 +81,22 @@ function renderPiecewise(points, { width, height, window, windowMethod, xFormat,
   const xHi = Math.min(xMax - eps, Math.max(rawHi, xMin + 2 * eps));
   if (xLo >= xHi) return renderLog(points, { width, height, xFormat, ...options });
 
-  // Pixel boundaries in log-space: smooth by construction, no data-rank dependency.
-  // Log-space allocation is the natural companion to power-scale tails.
-  const qLo = logFraction(xMin, xMax, xLo);
-  const qHi = logFraction(xMin, xMax, xHi);
+  // Pixel boundaries must be smooth as the slider moves.
+  //
+  // Quantile: derive from slider fraction directly — perfectly linear in slider,
+  // zero data dependency, zero cluster sensitivity.
+  //
+  // KDE / Mixture: xLo = exp(mu ± k·σ) is smooth in log-space, so logFraction
+  // maps it to pixels smoothly. smoothFraction can't be used here because it maps
+  // through the empirical CDF, which jumps at data clusters.
+  let qLo, qHi;
+  if (windowMethod === 'quantile' || !windowMethod) {
+    qLo = Math.max(0, 0.5 - window / 2);
+    qHi = Math.min(1, 0.5 + window / 2);
+  } else {
+    qLo = logFraction(xMin, xMax, xLo);
+    qHi = logFraction(xMin, xMax, xHi);
+  }
 
   const r0 = 0;
   const r1 = innerW * qLo;
