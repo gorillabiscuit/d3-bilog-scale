@@ -105,8 +105,18 @@ function renderPiecewise(points, {
     const tl = qLo > 0 ? leftScale.ticks(Math.max(1, Math.round(count * qLo)))          : [];
     const tm =            midScale.ticks(Math.max(1, Math.round(count * (qHi - qLo))));
     const tr = qHi < 1 ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qHi))))   : [];
-    // Always include xMax so the x-axis labels the data boundary on the right.
-    return [...tl, ...tm, ...tr, xMax];
+    // Always include xMax so the axis labels the right data boundary.
+    // Then cull any tick whose pixel position is within 20px of the previous one —
+    // sub-scale boundaries and the explicit xMax can produce near-duplicates.
+    const raw = [...tl, ...tm, ...tr, xMax];
+    const MIN_TICK_PX = 20;
+    const culled = [];
+    let lastPx = -Infinity;
+    for (const v of raw) {
+      const px = xScale(v);
+      if (px - lastPx >= MIN_TICK_PX) { culled.push(v); lastPx = px; }
+    }
+    return culled;
   };
   // Invert is needed for drag handles: pixel → domain value
   xScale.invert = px => {
