@@ -304,16 +304,19 @@ function renderPiecewise(points, {
         .attr('role', 'slider')
         .attr('aria-label', label);
 
-      // Invisible wide hit area so the grab target is easy to hit
-      handle.append('rect')
-        .attr('x', -8).attr('width', 16)
-        .attr('y', 0).attr('height', innerH)
-        .attr('fill', 'transparent');
-
-      // Thin full-height boundary line
+      // Invisible stroke-only hit line — 8px wide so the handle is easy to grab,
+      // but pointer-events: stroke means dots that aren't directly on the line
+      // still receive their own tooltip events (fall-through to elements below).
       handle.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-width', 1).attr('stroke-opacity', 0.3);
+        .attr('stroke', 'transparent').attr('stroke-width', 8)
+        .style('pointer-events', 'stroke');
+
+      // Thin full-height boundary line (visual only, no pointer events)
+      handle.append('line')
+        .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
+        .attr('stroke', tickColor).attr('stroke-width', 1).attr('stroke-opacity', 0.3)
+        .style('pointer-events', 'none');
 
       // Pill capsule centred vertically — the react-resizable-panels drag handle idiom
       const pillW = 8, pillH = 20;
