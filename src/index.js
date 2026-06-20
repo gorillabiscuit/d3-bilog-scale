@@ -17,6 +17,7 @@ const THEMES = {
     tooltipTextMuted:'#a0a0c0',
     overlayColor:    'white',
     tickColor:       'white',
+    chartBg:         '#16213e',
   },
   light: {
     dotColor:        '#4040cc',
@@ -29,6 +30,7 @@ const THEMES = {
     tooltipTextMuted:'#5050a0',
     overlayColor:    '#4040cc',
     tickColor:       '#4040cc',
+    chartBg:         '#ffffff',
   },
 };
 
@@ -43,7 +45,6 @@ const dotSizeSelect   = document.getElementById('dot-size');
 const dotOpacitySlider= document.getElementById('dot-opacity');
 const dotOpacityValue = document.getElementById('dot-opacity-value');
 const tailTicksSlider = document.getElementById('tail-ticks');
-const tailTicksValue  = document.getElementById('tail-ticks-value');
 
 // ── App state ────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ function renderExperimental() {
       dotRadius,
       dotOpacity,
       tailTicks,
+      showLocalRate: true,
     })
   );
 
@@ -171,9 +173,8 @@ dotOpacitySlider.addEventListener('input', () => {
   renderExperimental();
 });
 
-tailTicksSlider.addEventListener('input', () => {
-  tailTicks = +tailTicksSlider.value;
-  tailTicksValue.textContent = tailTicks;
+tailTicksSlider.addEventListener('change', () => {
+  tailTicks = tailTicksSlider.checked ? 6 : 0;
   renderExperimental();
 });
 

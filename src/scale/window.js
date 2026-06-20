@@ -7,11 +7,7 @@
  * Each method maps it to its own natural parameter space internally.
  */
 
-function quantile(sorted, p) {
-  const i = Math.max(0, Math.min(sorted.length - 1, p * (sorted.length - 1)));
-  const lo = Math.floor(i), hi = Math.ceil(i);
-  return sorted[lo] + (i - lo) * (sorted[hi] - sorted[lo]);
-}
+import { quantileSorted } from 'd3-array';
 
 function mean(values) {
   return values.reduce((s, v) => s + v, 0) / values.length;
@@ -28,8 +24,8 @@ function std(values, mu) {
 export function windowQuantile(values, slider) {
   const sorted = [...values].sort((a, b) => a - b);
   return {
-    xLo: quantile(sorted, Math.max(0, 0.5 - slider / 2)),
-    xHi: quantile(sorted, Math.min(1, 0.5 + slider / 2)),
+    xLo: quantileSorted(sorted, Math.max(0, 0.5 - slider / 2)),
+    xHi: quantileSorted(sorted, Math.min(1, 0.5 + slider / 2)),
   };
 }
 
@@ -81,8 +77,8 @@ export function windowMixture(values, slider) {
   const sorted = [...logVals].sort((a, b) => a - b);
 
   // Initialise: two components at the 25th and 75th percentile
-  let mu1 = quantile(sorted, 0.25);
-  let mu2 = quantile(sorted, 0.75);
+  let mu1 = quantileSorted(sorted, 0.25);
+  let mu2 = quantileSorted(sorted, 0.75);
   let s1  = std(logVals) * 0.5;
   let s2  = std(logVals) * 1.0;
   let pi1 = 0.5;

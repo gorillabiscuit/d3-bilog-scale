@@ -1,4 +1,4 @@
-import { scalePow, scaleLinear, scaleLog } from 'd3-scale';
+import { scaleLinear, scaleLog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
@@ -20,6 +20,7 @@ export function createAdaptiveChart(points, {
   tailTicks = 6,       // max ruler lines in each tail
   overlayColor = 'white',
   tickColor = 'white',
+  chartBg,             // chart background color for text halo on span annotation
   ...options
 } = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -31,7 +32,7 @@ export function createAdaptiveChart(points, {
     : renderPiecewise(points, {
         width, height, window, xFormat,
         xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
-        tailTicks, overlayColor, tickColor,
+        tailTicks, overlayColor, tickColor, chartBg,
         ...options,
       });
 }
@@ -52,7 +53,7 @@ const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 function renderPiecewise(points, {
   width, height, window, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
-  tailTicks, overlayColor, tickColor,
+  tailTicks, overlayColor, tickColor, chartBg,
   ...options
 }) {
   const innerW = width  - MARGIN.left - MARGIN.right;
@@ -80,10 +81,14 @@ function renderPiecewise(points, {
   const r2 = innerW * qHi;
   const r3 = innerW;
 
+  // scaleLog requires strictly positive domain values; clamp xMin away from zero
+  // so datasets with a $0 minimum don't break the log tail.
+  const logMin = xMin > 0 ? xMin : xMax * 1e-6;
+
   const buildScales = (lo, hi, p1, p2) => ({
-    leftScale:  scalePow().exponent(0.3).domain([xMin, lo]).range([r0, p1]),
+    leftScale:  scaleLog().domain([logMin, lo]).range([r0, p1]),
     midScale:   scaleLinear().domain([lo, hi]).range([p1, p2]),
-    rightScale: scalePow().exponent(0.3).domain([hi, xMax]).range([p2, r3]),
+    rightScale: scaleLog().domain([hi, xMax]).range([p2, r3]),
   });
 
   let { leftScale, midScale, rightScale } = buildScales(xLo, xHi, r1, r2);
@@ -100,7 +105,8 @@ function renderPiecewise(points, {
     const tl = qLo > 0 ? leftScale.ticks(Math.max(1, Math.round(count * qLo)))          : [];
     const tm =            midScale.ticks(Math.max(1, Math.round(count * (qHi - qLo))));
     const tr = qHi < 1 ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qHi))))   : [];
-    return [...tl, ...tm, ...tr];
+    // Always include xMax so the x-axis labels the data boundary on the right.
+    return [...tl, ...tm, ...tr, xMax];
   };
   // Invert is needed for drag handles: pixel → domain value
   xScale.invert = px => {
@@ -123,42 +129,127 @@ function renderPiecewise(points, {
       .attr('x', r1).attr('width', Math.max(0, r2 - r1))
       .attr('y', 0).attr('height', innerH)
       .attr('fill', overlayColor).attr('fill-opacity', 0.07)
-      .style('cursor', 'grab')
       .attr('tabindex', '0')
       .attr('role', 'slider')
       .attr('aria-label', 'Pan linear section — arrow keys to move, Shift for larger steps')
       .style('outline', 'none')
     .lower();
 
+  // Pan hint — appears at top and bottom of the linear section, fades after 3 s
+  const hintText = '← drag to pan →';
+  const hintFontSize = 10;
+  const hintPadX = 9, hintPadY = 4;
+  const hintW = hintText.length * 5.5 + hintPadX * 2;
+  const hintH = hintFontSize + hintPadY * 2;
+  const hintX = (r1 + r2) / 2;
+
+  [hintH / 2 + 4, innerH - hintH / 2 - 4].forEach(cy => {
+    const hg = g.append('g').attr('pointer-events', 'none').style('opacity', 0.9);
+    hg.append('rect')
+      .attr('x', hintX - hintW / 2).attr('y', cy - hintH / 2)
+      .attr('width', hintW).attr('height', hintH).attr('rx', hintH / 2)
+      .attr('fill', tickColor).attr('fill-opacity', 0.12)
+      .attr('stroke', tickColor).attr('stroke-opacity', 0.3).attr('stroke-width', 1);
+    hg.append('text')
+      .attr('x', hintX).attr('y', cy + hintFontSize * 0.35)
+      .attr('text-anchor', 'middle')
+      .attr('fill', tickColor).attr('fill-opacity', 0.65)
+      .attr('font-size', `${hintFontSize}px`)
+      .text(hintText);
+    hg.style('transition', 'opacity 0.8s');
+    setTimeout(() => {
+      hg.style('opacity', 0);
+      setTimeout(() => hg.remove(), 800);
+    }, 3000);
+  });
+
   // Ruler tick lines: one linear-window-width step into each tail
   // Kept in a dedicated group so they can be cleared and redrawn during drag.
   const tickGroup = g.append('g').attr('pointer-events', 'none');
 
-  function redrawTicks(lo, hi, scaleFn, p1, p2) {
+  // Use each sub-scale's own .ticks() to generate ruler lines.
+  // Domain-linear stepping fails when the tail spans orders of magnitude more
+  // than the linear window (first step collapses to <2px from the boundary).
+  // The sub-scale's ticks() spans the full tail range and always produces visible lines.
+  function redrawTicks(leftSub, rightSub) {
     tickGroup.selectAll('line').remove();
-    const step = hi - lo;
-    let lc = lo - step, ln = 0;
-    while (lc > xMin && ln < tailTicks) {
-      const px = scaleFn(lc);
-      if (p1 - px < 1) break;
+    if (tailTicks === 0) return;
+
+    const [leftMin, curXLo] = leftSub.domain();
+    const [curXHi, rightMax] = rightSub.domain();
+
+    // Place tick lines at equal dollar-step intervals — one linear-window-width per step.
+    // On the log sub-scale these compress toward the extremes, visually demonstrating
+    // that each interval covers the same dollar range as the linear section but in
+    // progressively fewer pixels. That's the point: the viewer sees the compression.
+    const windowSpan = curXHi - curXLo;
+
+    for (let i = 1; i <= tailTicks; i++) {
+      const v = curXLo - i * windowSpan;
+      if (v <= leftMin) break;
       tickGroup.append('line')
-        .attr('x1', px).attr('x2', px).attr('y1', 0).attr('y2', innerH)
+        .attr('x1', leftSub(v)).attr('x2', leftSub(v)).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-opacity', 0.25).attr('stroke-width', 1);
-      lc -= step; ln++;
     }
-    let rc = hi + step, rn = 0;
-    while (rc < xMax && rn < tailTicks) {
-      const px = scaleFn(rc);
-      if (px - p2 < 1) break;
+    for (let i = 1; i <= tailTicks; i++) {
+      const v = curXHi + i * windowSpan;
+      if (v >= rightMax) break;
       tickGroup.append('line')
-        .attr('x1', px).attr('x2', px).attr('y1', 0).attr('y2', innerH)
+        .attr('x1', rightSub(v)).attr('x2', rightSub(v)).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-opacity', 0.25).attr('stroke-width', 1);
-      rc += step; rn++;
     }
   }
 
-  redrawTicks(xLo, xHi, xScale, r1, r2);
+  redrawTicks(leftScale, rightScale);
 
+  // ── Region annotations ────────────────────────────────────────────────────
+  // Permanent dimension-line annotations: one per scale region, always visible.
+  // Shows the type label ("power" / "linear") above and the data range below.
+  const ANNOT_Y   = 24;   // y of the dimension line
+  const ANNOT_ARR = 5;    // arrowhead length in px
+  const annotFmt  = makeFmt(xFormat);
+
+  function makeAnnotation(typeLabel) {
+    const grp = g.append('g').attr('pointer-events', 'none');
+
+    grp.append('text')
+      .attr('class', 'annot-type').attr('y', 8).attr('text-anchor', 'middle')
+      .attr('fill', tickColor).attr('fill-opacity', 0.3)
+      .attr('font-size', '9px').attr('font-style', 'italic')
+      .text(typeLabel);
+
+    const valueTxt = grp.append('text')
+      .attr('class', 'annot-value').attr('y', ANNOT_Y - 2).attr('text-anchor', 'middle')
+      .attr('fill', tickColor).attr('fill-opacity', 0.65)
+      .attr('font-size', '10px').attr('font-weight', '500')
+      .style('paint-order', 'stroke fill');
+    if (chartBg) valueTxt.attr('stroke', chartBg).attr('stroke-width', 3);
+
+    const dimLine = grp.append('line')
+      .attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
+      .attr('stroke', tickColor).attr('stroke-opacity', 0.45).attr('stroke-width', 1);
+    const arrL = grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', 0.45);
+    const arrR = grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', 0.45);
+
+    return function update(p1, p2, lo, hi) {
+      if (p2 - p1 < 2 * ANNOT_ARR + 28) { grp.style('display', 'none'); return; }
+      grp.style('display', null);
+      const cx = (p1 + p2) / 2;
+      grp.select('.annot-type').attr('x', cx);
+      valueTxt.attr('x', cx).text(annotFmt(hi - lo));
+      dimLine.attr('x1', p1 + ANNOT_ARR).attr('x2', p2 - ANNOT_ARR);
+      arrL.attr('points', `${p1},${ANNOT_Y} ${p1+ANNOT_ARR},${ANNOT_Y-3} ${p1+ANNOT_ARR},${ANNOT_Y+3}`);
+      arrR.attr('points', `${p2},${ANNOT_Y} ${p2-ANNOT_ARR},${ANNOT_Y-3} ${p2-ANNOT_ARR},${ANNOT_Y+3}`);
+    };
+  }
+
+  const updateLeftAnnot   = makeAnnotation('log');
+  const updateLinearAnnot = makeAnnotation('linear');
+  const updateRightAnnot  = makeAnnotation('log');
+
+  updateLeftAnnot(r0, r1, xMin, xLo);
+  updateLinearAnnot(r1, r2, xLo, xHi);
+  updateRightAnnot(r2, r3, xHi, xMax);
 
   // ── Drag handles ─────────────────────────────────────────────────────────────
   if (onWindowChange) {
@@ -172,7 +263,9 @@ function renderPiecewise(points, {
       const liveScale = v => v <= newXLo ? s.leftScale(v) : v <= xHi ? s.midScale(v) : rightScale(v);
       circles.attr('cx', d => liveScale(d.x));
       overlay.attr('x', px).attr('width', Math.max(0, r2 - px));
-      redrawTicks(newXLo, xHi, liveScale, px, r2);
+      redrawTicks(s.leftScale, rightScale);
+      updateLeftAnnot(r0, px, xMin, newXLo);
+      updateLinearAnnot(px, r2, newXLo, xHi);
       onWindowDrag?.({ xLo: newXLo, xHi });
       return newXLo;
     }
@@ -183,7 +276,9 @@ function renderPiecewise(points, {
       const liveScale = v => v <= xLo ? leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
       circles.attr('cx', d => liveScale(d.x));
       overlay.attr('width', Math.max(0, px - r1));
-      redrawTicks(xLo, newXHi, liveScale, r1, px);
+      redrawTicks(leftScale, s.rightScale);
+      updateLinearAnnot(r1, px, xLo, newXHi);
+      updateRightAnnot(px, r3, newXHi, xMax);
       onWindowDrag?.({ xLo, xHi: newXHi });
       return newXHi;
     }
@@ -193,7 +288,7 @@ function renderPiecewise(points, {
       const handle = g.append('g')
         .attr('class', `handle handle-${side}`)
         .attr('transform', `translate(${initialPx},0)`)
-        .style('cursor', 'ew-resize')
+        .style('cursor', 'col-resize')
         .style('outline', 'none')   // suppress browser focus ring; pill provides the visual
         .attr('tabindex', '0')
         .attr('role', 'slider')
@@ -216,7 +311,7 @@ function renderPiecewise(points, {
       const pill = handle.append('rect')
         .attr('x', -pillW / 2).attr('y', pillY)
         .attr('width', pillW).attr('height', pillH)
-        .attr('rx', pillW / 2)          // fully rounded → capsule
+        .attr('rx', pillW / 2)
         .attr('fill', tickColor).attr('fill-opacity', 0.22);
 
       // 2 × 3 grab-dot grid inside the pill
@@ -244,6 +339,7 @@ function renderPiecewise(points, {
 
     let currentXLo = xLo, currentXHi = xHi;
     let currentR1 = r1, currentR2 = r2;
+    let finalR1 = r1, finalR2 = r2;
 
     // Declare handles up front so the panZone drag closure can reference them
     // even though the DOM nodes are created below.
@@ -270,13 +366,16 @@ function renderPiecewise(points, {
         overlay.attr('x', newR1).attr('width', boxW);
         leftHandle?.attr('transform', `translate(${newR1},0)`);
         rightHandle?.attr('transform', `translate(${newR2},0)`);
-        redrawTicks(newXLo, newXHi, liveScale, newR1, newR2);
+        redrawTicks(s.leftScale, s.rightScale);
+        updateLeftAnnot(r0, newR1, xMin, newXLo);
+        updateLinearAnnot(newR1, newR2, newXLo, newXHi);
+        updateRightAnnot(newR2, r3, newXHi, xMax);
         onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
         currentXLo = newXLo; currentXHi = newXHi;
         currentR1 = newR1;   currentR2 = newR2;
       })
       .on('end', () => {
-        overlay.style('cursor', 'grab');
+        overlay.style('cursor', null);
         onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
@@ -330,14 +429,12 @@ function renderPiecewise(points, {
       overlay.attr('x', newR1).attr('width', boxW);
       leftHandle?.attr('transform', `translate(${newR1},0)`);
       rightHandle?.attr('transform', `translate(${newR2},0)`);
-      redrawTicks(newXLo, newXHi, liveScale, newR1, newR2);
+      redrawTicks(s.leftScale, s.rightScale);
       onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
       currentXLo = newXLo; currentXHi = newXHi;
       currentR1 = newR1;   currentR2 = newR2;
       onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
     });
-
-    let finalR1 = r1, finalR2 = r2;
 
     leftHandle.call(drag()
       .on('drag', event => {
@@ -346,7 +443,9 @@ function renderPiecewise(points, {
         currentXLo = applyLeftDrag(px);
         leftHandle.attr('transform', `translate(${px},0)`);
       })
-      .on('end', () => onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: finalR1 / innerW, qHi: qHi }))
+      .on('end', () => {
+        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: finalR1 / innerW, qHi: qHi });
+      })
     );
 
     rightHandle.call(drag()
@@ -356,7 +455,9 @@ function renderPiecewise(points, {
         currentXHi = applyRightDrag(px);
         rightHandle.attr('transform', `translate(${px},0)`);
       })
-      .on('end', () => onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: qLo, qHi: finalR2 / innerW }))
+      .on('end', () => {
+        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: qLo, qHi: finalR2 / innerW });
+      })
     );
   }
 

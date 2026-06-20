@@ -45,6 +45,7 @@ export function createChart(points, xScale, {
   xFormat      = '~s',
   yFormat      = '~s',
   clipPadding,           // extra px around the plot area before clipping; defaults to dot radius
+  showLocalRate     = false, // show "1px ≈ $X" in tooltip — useful for non-linear scales
   // --- appearance ---
   dotColor          = '#7070ff',
   dotRadius,             // undefined → auto-size by point count
@@ -132,6 +133,10 @@ export function createChart(points, xScale, {
     .attr('fill', tooltipTextMuted).attr('font-size', '11px')
     .attr('x', 8).attr('y', 33);
 
+  tt.append('text').attr('class', 'tt-line3')
+    .attr('fill', tooltipTextMuted).attr('font-size', '10px')
+    .attr('x', 8).attr('y', 49);
+
   // ── Dots ─────────────────────────────────────────────────────────────────
   g.append('g')
     .attr('clip-path', `url(#${clipId})`)
@@ -154,12 +159,22 @@ export function createChart(points, xScale, {
       tt.select('.tt-line1').text(line1);
       tt.select('.tt-line2').text(line2);
 
-      const ttW = Math.max(line1.length, line2.length) * 6.5 + 16;
-      tt.select('.tt-bg').attr('width', ttW).attr('height', 46);
+      let ttH = 46;
+      let maxLen = Math.max(line1.length, line2.length);
+      if (showLocalRate) {
+        const cx = xScale(d.x);
+        const rate = Math.abs(xScale.invert(cx + 1) - xScale.invert(cx));
+        const line3 = `1px ≈ ${xFmt(rate)}`;
+        tt.select('.tt-line3').text(line3);
+        maxLen = Math.max(maxLen, line3.length);
+        ttH = 58;
+      }
+      const ttW = maxLen * 6.5 + 16;
+      tt.select('.tt-bg').attr('width', ttW).attr('height', ttH);
 
       tt.raise().style('display', null);
       const [px, py] = pointer(event, g.node());
-      positionTooltip(px, py, ttW, 46);
+      positionTooltip(px, py, ttW, ttH);
     })
     .on('pointermove', function(event) {
       const ttW = +tt.select('.tt-bg').attr('width') || 160;

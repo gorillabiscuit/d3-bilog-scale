@@ -149,6 +149,35 @@
       min-width: 3ch;
     }
 
+    /* ── Toggle switch ─────────────────────────────────────────────────── */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 30px;
+      height: 17px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 9px;
+      transition: background 0.15s;
+    }
+    .toggle-track::before {
+      content: '';
+      position: absolute;
+      width: 11px; height: 11px;
+      left: 3px; top: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.15s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--accent); }
+    .toggle-switch input:checked + .toggle-track::before { transform: translateX(13px); }
+
     /* ── Chart ─────────────────────────────────────────────────────────── */
     #chart-adaptive {
       width: 100%;
@@ -208,8 +237,10 @@
 
     <div class="settings-group">
       <label for="tail-ticks">Tail lines</label>
-      <input type="range" id="tail-ticks" min="0" max="12" step="1" value="6">
-      <span class="settings-readout" id="tail-ticks-value">6</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="tail-ticks" checked>
+        <span class="toggle-track"></span>
+      </label>
     </div>
   </div>
 
