@@ -265,31 +265,37 @@ function renderPiecewise(points, {
   if (onWindowChange) {
     const circles = g.selectAll('circle');
 
-    // Rebuilds left+mid scales from a new left boundary pixel position
-    // and updates circles + overlay in place — no full re-render needed during drag.
+    let currentXLo = xLo, currentXHi = xHi;
+    let currentR1  = r1,  currentR2  = r2;
+
+    function applyState(newXLo, newXHi, newR1, newR2) {
+      const s = buildScales(newXLo, newXHi, newR1, newR2);
+      const ls = v => v <= newXLo ? s.leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
+      circles.attr('cx', d => ls(d.x));
+      overlay.attr('x', newR1).attr('width', Math.max(0, newR2 - newR1));
+      leftHandle?.attr('transform',  `translate(${newR1},0)`);
+      rightHandle?.attr('transform', `translate(${newR2},0)`);
+      redrawTicks(s.leftScale, s.rightScale);
+      updateLeftAnnot(r0, newR1, xMin, newXLo);
+      updateLinearAnnot(newR1, newR2, newXLo, newXHi);
+      updateRightAnnot(newR2, r3, newXHi, xMax);
+      onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
+      currentXLo = newXLo; currentXHi = newXHi;
+      currentR1  = newR1;  currentR2  = newR2;
+    }
+
     function applyLeftDrag(px) {
-      const newXLo = xScale.invert(px);
-      const s = buildScales(newXLo, xHi, px, r2);
-      const liveScale = v => v <= newXLo ? s.leftScale(v) : v <= xHi ? s.midScale(v) : rightScale(v);
-      circles.attr('cx', d => liveScale(d.x));
-      overlay.attr('x', px).attr('width', Math.max(0, r2 - px));
-      redrawTicks(s.leftScale, rightScale);
-      updateLeftAnnot(r0, px, xMin, newXLo);
-      updateLinearAnnot(px, r2, newXLo, xHi);
-      onWindowDrag?.({ xLo: newXLo, xHi });
+      // Full-range log scale — avoids exponential blowup when the left tail is
+      // tiny (small r1). scaleLog([logMin,xLo],[0,r1]).invert exponentiation by
+      // px/r1 is huge when r1 << px.
+      const newXLo = scaleLog().domain([logMin, currentXHi]).range([r0, currentR2]).invert(px);
+      applyState(newXLo, currentXHi, px, currentR2);
       return newXLo;
     }
 
     function applyRightDrag(px) {
-      const newXHi = xScale.invert(px);
-      const s = buildScales(xLo, newXHi, r1, px);
-      const liveScale = v => v <= xLo ? leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
-      circles.attr('cx', d => liveScale(d.x));
-      overlay.attr('width', Math.max(0, px - r1));
-      redrawTicks(leftScale, s.rightScale);
-      updateLinearAnnot(r1, px, xLo, newXHi);
-      updateRightAnnot(px, r3, newXHi, xMax);
-      onWindowDrag?.({ xLo, xHi: newXHi });
+      const newXHi = scaleLog().domain([currentXLo, xMax]).range([currentR1, r3]).invert(px);
+      applyState(currentXLo, newXHi, currentR1, px);
       return newXHi;
     }
 
@@ -299,26 +305,21 @@ function renderPiecewise(points, {
         .attr('class', `handle handle-${side}`)
         .attr('transform', `translate(${initialPx},0)`)
         .style('cursor', 'col-resize')
-        .style('outline', 'none')   // suppress browser focus ring; pill provides the visual
+        .style('outline', 'none')
         .attr('tabindex', '0')
         .attr('role', 'slider')
         .attr('aria-label', label);
 
-      // Invisible stroke-only hit line — 8px wide so the handle is easy to grab,
-      // but pointer-events: stroke means dots that aren't directly on the line
-      // still receive their own tooltip events (fall-through to elements below).
       handle.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', 'transparent').attr('stroke-width', 8)
         .style('pointer-events', 'stroke');
 
-      // Thin full-height boundary line (visual only, no pointer events)
       handle.append('line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-width', 1).attr('stroke-opacity', 0.3)
         .style('pointer-events', 'none');
 
-      // Pill capsule centred vertically — the react-resizable-panels drag handle idiom
       const pillW = 8, pillH = 20;
       const pillY  = innerH / 2 - pillH / 2;
       const pill = handle.append('rect')
@@ -327,7 +328,6 @@ function renderPiecewise(points, {
         .attr('rx', pillW / 2)
         .attr('fill', tickColor).attr('fill-opacity', 0.22);
 
-      // 2 × 3 grab-dot grid inside the pill
       [-2, 2].forEach(cx =>
         [-5, 0, 5].forEach(dy =>
           handle.append('circle')
@@ -337,7 +337,6 @@ function renderPiecewise(points, {
         )
       );
 
-      // Hover / focus: brighten pill + line
       handle.on('mouseenter focus', () => {
         pill.attr('fill-opacity', 0.55);
         handle.select('line').attr('stroke-opacity', 0.6);
@@ -350,42 +349,34 @@ function renderPiecewise(points, {
       return handle;
     }
 
-    let currentXLo = xLo, currentXHi = xHi;
-    let currentR1 = r1, currentR2 = r2;
-    let finalR1 = r1, finalR2 = r2;
-
-    // Declare handles up front so the panZone drag closure can reference them
-    // even though the DOM nodes are created below.
+    // Declare handles before pan drag so the pan closure can reference them.
     let leftHandle, rightHandle;
 
-    // Pan: the box moves in pixel space; xScale.invert maps new pixel positions
-    // back to domain values each frame. Data stays put, the window slides over it.
-    const boxW = r2 - r1;
-    let panStartX = 0;
+    // Pan: the box translates rigidly in pixel space. Domain values are derived
+    // by a uniform linear rate (mid-scale units/pixel) so 1px of pan always equals
+    // the same dollar step — no jump when the box crosses the initial boundaries.
+    let panStartX = 0, panStartR1 = r1, panStartXLo = xLo, panStartXHi = xHi;
 
     overlay.call(drag()
       .on('start', event => {
-        panStartX = event.x;
+        panStartX   = event.x;
+        panStartR1  = currentR1;
+        panStartXLo = currentXLo;
+        panStartXHi = currentXHi;
         overlay.style('cursor', 'grabbing');
       })
       .on('drag', event => {
-        const newR1 = Math.max(r0, Math.min(r3 - boxW, r1 + (event.x - panStartX)));
-        const newR2 = newR1 + boxW;
-        const newXLo = xScale.invert(newR1);
-        const newXHi = xScale.invert(newR2);
-        const s = buildScales(newXLo, newXHi, newR1, newR2);
-        const liveScale = v => v <= newXLo ? s.leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
-        circles.attr('cx', d => liveScale(d.x));
-        overlay.attr('x', newR1).attr('width', boxW);
-        leftHandle?.attr('transform', `translate(${newR1},0)`);
-        rightHandle?.attr('transform', `translate(${newR2},0)`);
-        redrawTicks(s.leftScale, s.rightScale);
-        updateLeftAnnot(r0, newR1, xMin, newXLo);
-        updateLinearAnnot(newR1, newR2, newXLo, newXHi);
-        updateRightAnnot(newR2, r3, newXHi, xMax);
-        onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
-        currentXLo = newXLo; currentXHi = newXHi;
-        currentR1 = newR1;   currentR2 = newR2;
+        const boxW    = currentR2 - currentR1;
+        const panRate = (currentXHi - currentXLo) / boxW; // domain units per pixel
+        const delta   = event.x - panStartX;
+        const newR1   = Math.max(r0, Math.min(r3 - boxW, panStartR1 + delta));
+        const newR2   = newR1 + boxW;
+        const rawDelta = (newR1 - panStartR1) * panRate;
+        let newXLo = panStartXLo + rawDelta;
+        let newXHi = panStartXHi + rawDelta;
+        if (newXLo < xMin) { newXHi -= (newXLo - xMin); newXLo = xMin; }
+        if (newXHi > xMax) { newXLo -= (newXHi - xMax); newXHi = xMax; }
+        applyState(newXLo, newXHi, newR1, newR2);
       })
       .on('end', () => {
         overlay.style('cursor', null);
@@ -396,7 +387,6 @@ function renderPiecewise(points, {
     leftHandle  = makeHandle(r1, 'left');
     rightHandle = makeHandle(r2, 'right');
 
-    // Keyboard step: 5px normal, 2% of chart width with Shift
     const kbStep = event => event.shiftKey ? innerW * 0.02 : 5;
 
     leftHandle.on('keydown', event => {
@@ -404,15 +394,9 @@ function renderPiecewise(points, {
       event.preventDefault();
       const dir = event.key === 'ArrowRight' ? 1 : -1;
       const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, currentR1 + dir * kbStep(event)));
-      // Treat left-boundary drag the same way the mouse drag does:
-      // applyLeftDrag rebuilds scales live; then commit via onWindowChange.
-      // We synthesise finalR1 here so the dragend path is consistent.
-      finalR1 = px;
-      currentXLo = applyLeftDrag(px);
-      leftHandle.attr('transform', `translate(${px},0)`)
-                .attr('aria-valuenow', currentXLo);
-      currentR1 = px;
-      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: px / innerW, qHi: currentR2 / innerW });
+      applyLeftDrag(px);
+      leftHandle.attr('aria-valuenow', currentXLo);
+      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
     });
 
     rightHandle.on('keydown', event => {
@@ -420,56 +404,43 @@ function renderPiecewise(points, {
       event.preventDefault();
       const dir = event.key === 'ArrowRight' ? 1 : -1;
       const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, currentR2 + dir * kbStep(event)));
-      finalR2 = px;
-      currentXHi = applyRightDrag(px);
-      rightHandle.attr('transform', `translate(${px},0)`)
-                 .attr('aria-valuenow', currentXHi);
-      currentR2 = px;
-      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: px / innerW });
+      applyRightDrag(px);
+      rightHandle.attr('aria-valuenow', currentXHi);
+      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
     });
 
     overlay.on('keydown', event => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
-      const dir = event.key === 'ArrowRight' ? 1 : -1;
-      const newR1 = Math.max(r0, Math.min(r3 - boxW, currentR1 + dir * kbStep(event)));
+      const dir   = event.key === 'ArrowRight' ? 1 : -1;
+      const boxW  = currentR2 - currentR1;
+      const step  = kbStep(event);
+      const panRate = (currentXHi - currentXLo) / boxW;
+      const newR1 = Math.max(r0, Math.min(r3 - boxW, currentR1 + dir * step));
       const newR2 = newR1 + boxW;
-      const newXLo = xScale.invert(newR1);
-      const newXHi = xScale.invert(newR2);
-      const s = buildScales(newXLo, newXHi, newR1, newR2);
-      const liveScale = v => v <= newXLo ? s.leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
-      circles.attr('cx', d => liveScale(d.x));
-      overlay.attr('x', newR1).attr('width', boxW);
-      leftHandle?.attr('transform', `translate(${newR1},0)`);
-      rightHandle?.attr('transform', `translate(${newR2},0)`);
-      redrawTicks(s.leftScale, s.rightScale);
-      onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
-      currentXLo = newXLo; currentXHi = newXHi;
-      currentR1 = newR1;   currentR2 = newR2;
+      const newXLo = Math.max(xMin, currentXLo + dir * step * panRate);
+      const newXHi = Math.min(xMax, currentXHi + dir * step * panRate);
+      applyState(newXLo, newXHi, newR1, newR2);
       onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
     });
 
     leftHandle.call(drag()
       .on('drag', event => {
-        const px = Math.max(r0, Math.min(r2 - MIN_WINDOW_PX, event.x));
-        finalR1 = px;
-        currentXLo = applyLeftDrag(px);
-        leftHandle.attr('transform', `translate(${px},0)`);
+        const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, event.x));
+        applyLeftDrag(px);
       })
       .on('end', () => {
-        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: finalR1 / innerW, qHi: qHi });
+        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
 
     rightHandle.call(drag()
       .on('drag', event => {
-        const px = Math.max(r1 + MIN_WINDOW_PX, Math.min(r3, event.x));
-        finalR2 = px;
-        currentXHi = applyRightDrag(px);
-        rightHandle.attr('transform', `translate(${px},0)`);
+        const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, event.x));
+        applyRightDrag(px);
       })
       .on('end', () => {
-        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: qLo, qHi: finalR2 / innerW });
+        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
   }
