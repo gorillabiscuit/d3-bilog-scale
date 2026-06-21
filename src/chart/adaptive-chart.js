@@ -284,7 +284,7 @@ function renderPiecewise(points, {
         g.append('rect')
           .attr('x', fillX).attr('width', fillW)
           .attr('y', 0).attr('height', innerH)
-          .attr('fill', tickColor).attr('fill-opacity', 0.22);
+          .attr('fill', tickColor).attr('fill-opacity', 0.50);
       }
     }
 
