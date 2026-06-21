@@ -3,6 +3,7 @@ import { extent } from 'd3-array';
 import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
 import { axisBottom } from 'd3-axis';
+import { timer } from 'd3-timer';
 import { createChart, makeFmt, MARGIN } from './base-chart.js';
 import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile } from '../scale/window.js';
@@ -471,33 +472,54 @@ function renderPiecewise(points, {
     // Declare handles before pan drag so the pan closure can reference them.
     let leftHandle, rightHandle;
 
-    // Pan: the box translates rigidly in pixel space. Domain values are derived
-    // by a uniform linear rate (mid-scale units/pixel) so 1px of pan always equals
-    // the same dollar step — no jump when the box crosses the initial boundaries.
+    // Pan: the box translates rigidly in pixel space; the domain follows at a uniform
+    // dollar-per-pixel rate. When the pointer pushes past a chart edge the box docks and
+    // the window AUTO-SCROLLS through the data on a d3.timer, so it keeps going while the
+    // pointer is held — speed scaling with how far past the edge the pointer is. The
+    // accumulated scroll is folded into the domain so dragging back is seamless.
+    const AUTO_GAIN = 0.12;          // overshoot px → fraction of a pan-step per ~frame
+    const AUTO_MAX_OVERSHOOT = 120;  // cap so it can't scroll absurdly fast
     let panStartX = 0, panStartR1 = r1, panStartXLo = xLo, panStartXHi = xHi;
+    let panBoxW = r2 - r1, panRate = (xHi - xLo) / panBoxW;
+    let panPointerX = 0, panAutoAccum = 0, panPrevElapsed = 0, panTimer = null;
+
+    const panOvershoot = () => {              // signed px the desired box sits past an edge
+      const desiredR1 = panStartR1 + (panPointerX - panStartX);
+      if (desiredR1 > r3 - panBoxW) return Math.min(desiredR1 - (r3 - panBoxW), AUTO_MAX_OVERSHOOT);
+      if (desiredR1 < r0)          return Math.max(desiredR1 - r0, -AUTO_MAX_OVERSHOOT);
+      return 0;
+    };
+    function panApply() {
+      const delta   = panPointerX - panStartX;
+      const newR1   = Math.max(r0, Math.min(r3 - panBoxW, panStartR1 + delta)); // box docks at edge
+      const newR2   = newR1 + panBoxW;
+      const boundedDelta = newR1 - panStartR1;                                  // pointer pan, capped at the dock
+      let newXLo = panStartXLo + boundedDelta * panRate + panAutoAccum;
+      let newXHi = panStartXHi + boundedDelta * panRate + panAutoAccum;
+      if (newXLo < xMin + eps) { newXHi -= (newXLo - (xMin + eps)); newXLo = xMin + eps; }
+      if (newXHi > xMax - eps) { newXLo -= (newXHi - (xMax - eps)); newXHi = xMax - eps; }
+      applyState(newXLo, newXHi, newR1, newR2);
+    }
 
     overlay.call(drag()
       .on('start', event => {
-        panStartX   = event.x;
-        panStartR1  = currentR1;
-        panStartXLo = currentXLo;
-        panStartXHi = currentXHi;
+        panStartX = event.x; panPointerX = event.x;
+        panStartR1 = currentR1; panStartXLo = currentXLo; panStartXHi = currentXHi;
+        panBoxW = currentR2 - currentR1; panRate = (currentXHi - currentXLo) / panBoxW;
+        panAutoAccum = 0; panPrevElapsed = 0;
         overlay.style('cursor', 'grabbing');
+        panTimer = timer(elapsed => {
+          const dt = Math.min(elapsed - panPrevElapsed, 50); panPrevElapsed = elapsed;
+          const over = panOvershoot();
+          // Only keep scrolling while there's data left to reveal in that direction.
+          const canScroll = over > 0 ? currentXHi < xMax - eps * 2
+                          : over < 0 ? currentXLo > xMin + eps * 2 : false;
+          if (canScroll) { panAutoAccum += over * panRate * AUTO_GAIN * (dt / 16); panApply(); }
+        });
       })
-      .on('drag', event => {
-        const boxW    = currentR2 - currentR1;
-        const panRate = (currentXHi - currentXLo) / boxW; // domain units per pixel
-        const delta   = event.x - panStartX;
-        const newR1   = Math.max(r0, Math.min(r3 - boxW, panStartR1 + delta));
-        const newR2   = newR1 + boxW;
-        const rawDelta = (newR1 - panStartR1) * panRate;
-        let newXLo = panStartXLo + rawDelta;
-        let newXHi = panStartXHi + rawDelta;
-        if (newXLo < xMin + eps) { newXHi -= (newXLo - (xMin + eps)); newXLo = xMin + eps; }
-        if (newXHi > xMax   - eps) { newXLo -= (newXHi - (xMax   - eps)); newXHi = xMax   - eps; }
-        applyState(newXLo, newXHi, newR1, newR2);
-      })
+      .on('drag', event => { panPointerX = event.x; panApply(); })
       .on('end', () => {
+        if (panTimer) { panTimer.stop(); panTimer = null; }
         overlay.style('cursor', null);
         onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
