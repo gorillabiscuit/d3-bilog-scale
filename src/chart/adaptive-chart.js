@@ -49,6 +49,8 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 // ── Piecewise mode ────────────────────────────────────────────────────────────
 
 const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
+const BAND_MIN_PX   = 2;  // hatch lines closer than this merge into solid fill
+let   _hatchInstId  = 0;  // unique id per chart instance for clip path refs
 
 function renderPiecewise(points, {
   width, height, window, xFormat,
@@ -132,6 +134,15 @@ function renderPiecewise(points, {
   const node = createChart(points, xScale, { width, height, xFormat, ...options });
   const g = select(node).select('g');
 
+  // Per-instance clip paths so diagonal hatch lines don't bleed into the linear region.
+  // Rect dimensions are updated dynamically by redrawHatch on every drag event.
+  const hatchInstId   = ++_hatchInstId;
+  const svgDefs       = select(node).select('defs');
+  const leftClipRect  = svgDefs.append('clipPath').attr('id', `hatch-left-${hatchInstId}`)
+    .append('rect').attr('x', r0).attr('y', 0).attr('width', r1 - r0).attr('height', innerH);
+  const rightClipRect = svgDefs.append('clipPath').attr('id', `hatch-right-${hatchInstId}`)
+    .append('rect').attr('x', r2).attr('y', 0).attr('width', r3 - r2).attr('height', innerH);
+
   // Overlay on linear region — lowered below dots so dots still get pointer
   // events for tooltips. Drag is attached here so clicks on empty space in the
   // linear region trigger the pan while clicks on dots reach the dot handlers.
@@ -173,44 +184,91 @@ function renderPiecewise(points, {
     }, 3000);
   });
 
-  // Ruler tick lines: one linear-window-width step into each tail
-  // Kept in a dedicated group so they can be cleared and redrawn during drag.
-  const tickGroup = g.append('g').attr('pointer-events', 'none');
+  // Diagonal hatch lines at equal dollar-step intervals across each tail.
+  // Lines are placed at window-span domain steps — identical to the bunched reference
+  // lines approach but drawn at 45° so they read as texture rather than ruler marks.
+  // Because the sub-scales are logarithmic, equal domain steps compress toward the
+  // extremes, making the hatching visibly denser where the scale is most compressed.
+  // When adjacent lines are sub-pixel apart we switch to a solid fill rectangle.
+  const HATCH_DX   = innerH; // 45° diagonal: x-offset equals chart height
+  const hatchGroup = g.append('g').attr('pointer-events', 'none');
+  // Raise dots above the hatch so data is always legible through the texture.
+  g.selectAll('circle').raise();
 
-  // Use each sub-scale's own .ticks() to generate ruler lines.
-  // Domain-linear stepping fails when the tail spans orders of magnitude more
-  // than the linear window (first step collapses to <2px from the boundary).
-  // The sub-scale's ticks() spans the full tail range and always produces visible lines.
-  function redrawTicks(leftSub, rightSub) {
-    tickGroup.selectAll('line').remove();
-    if (tailTicks === 0) return;
+  function redrawHatch(leftSub, rightSub) {
+    hatchGroup.selectAll('*').remove();
 
     const [leftMin, curXLo] = leftSub.domain();
     const [curXHi, rightMax] = rightSub.domain();
-
-    // Place tick lines at equal dollar-step intervals — one linear-window-width per step.
-    // On the log sub-scale these compress toward the extremes, visually demonstrating
-    // that each interval covers the same dollar range as the linear section but in
-    // progressively fewer pixels. That's the point: the viewer sees the compression.
     const windowSpan = curXHi - curXLo;
+    const curR1 = leftSub.range()[1];
+    const curR2 = rightSub.range()[0];
 
-    for (let i = 1; i <= tailTicks; i++) {
-      const v = curXLo - i * windowSpan;
-      if (v <= leftMin) break;
-      tickGroup.append('line')
-        .attr('x1', leftSub(v)).attr('x2', leftSub(v)).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-opacity', 0.25).attr('stroke-width', 1);
+    // Keep clip rects in sync with the current handle positions.
+    leftClipRect.attr('width', curR1 - r0);
+    rightClipRect.attr('x', curR2).attr('width', r3 - curR2);
+
+    const leftG  = hatchGroup.append('g').attr('clip-path', `url(#hatch-left-${hatchInstId})`);
+    const rightG = hatchGroup.append('g').attr('clip-path', `url(#hatch-right-${hatchInstId})`);
+
+    // Left tail — iterate inward from the boundary toward the extreme.
+    let prevPx = curR1;
+    let leftLines = 0;
+    for (let v = curXLo - windowSpan; v > leftMin; v -= windowSpan) {
+      const px = leftSub(v);
+      if (prevPx - px < BAND_MIN_PX) {
+        leftG.append('rect')
+          .attr('x', r0).attr('width', Math.max(1, px - r0))
+          .attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', 0.22);
+        leftLines++;
+        break;
+      }
+      leftG.append('line')
+        .attr('x1', px).attr('y1', 0)
+        .attr('x2', px + HATCH_DX).attr('y2', innerH)
+        .attr('stroke', tickColor).attr('stroke-opacity', 0.28).attr('stroke-width', 1);
+      prevPx = px;
+      leftLines++;
     }
-    for (let i = 1; i <= tailTicks; i++) {
-      const v = curXHi + i * windowSpan;
-      if (v >= rightMax) break;
-      tickGroup.append('line')
-        .attr('x1', rightSub(v)).attr('x2', rightSub(v)).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-opacity', 0.25).attr('stroke-width', 1);
+    // When the entire tail is narrower than one window-width (too compressed for even
+    // one line), show a flat tint so it's still visually distinct from the linear region.
+    if (leftLines === 0 && curR1 - r0 > 1) {
+      leftG.append('rect')
+        .attr('x', r0).attr('width', curR1 - r0)
+        .attr('y', 0).attr('height', innerH)
+        .attr('fill', tickColor).attr('fill-opacity', 0.10);
+    }
+
+    // Right tail — iterate inward from the boundary toward the extreme.
+    prevPx = curR2;
+    let rightLines = 0;
+    for (let v = curXHi + windowSpan; v < rightMax; v += windowSpan) {
+      const px = rightSub(v);
+      if (px - prevPx < BAND_MIN_PX) {
+        rightG.append('rect')
+          .attr('x', prevPx).attr('width', Math.max(1, r3 - prevPx))
+          .attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', 0.22);
+        rightLines++;
+        break;
+      }
+      rightG.append('line')
+        .attr('x1', px).attr('y1', 0)
+        .attr('x2', px + HATCH_DX).attr('y2', innerH)
+        .attr('stroke', tickColor).attr('stroke-opacity', 0.28).attr('stroke-width', 1);
+      prevPx = px;
+      rightLines++;
+    }
+    if (rightLines === 0 && r3 - curR2 > 1) {
+      rightG.append('rect')
+        .attr('x', curR2).attr('width', r3 - curR2)
+        .attr('y', 0).attr('height', innerH)
+        .attr('fill', tickColor).attr('fill-opacity', 0.10);
     }
   }
 
-  redrawTicks(leftScale, rightScale);
+  redrawHatch(leftScale, rightScale);
 
   // ── Region annotations ────────────────────────────────────────────────────
   // Permanent dimension-line annotations: one per scale region, always visible.
@@ -275,7 +333,7 @@ function renderPiecewise(points, {
       overlay.attr('x', newR1).attr('width', Math.max(0, newR2 - newR1));
       leftHandle?.attr('transform',  `translate(${newR1},0)`);
       rightHandle?.attr('transform', `translate(${newR2},0)`);
-      redrawTicks(s.leftScale, s.rightScale);
+      redrawHatch(s.leftScale, s.rightScale);
       updateLeftAnnot(r0, newR1, xMin, newXLo);
       updateLinearAnnot(newR1, newR2, newXLo, newXHi);
       updateRightAnnot(newR2, r3, newXHi, xMax);
