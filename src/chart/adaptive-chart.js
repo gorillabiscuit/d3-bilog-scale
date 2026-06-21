@@ -1,4 +1,4 @@
-import { scaleLinear, scaleLog } from 'd3-scale';
+import { scaleLinear, scaleLog, scaleSymlog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
@@ -51,6 +51,53 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 let   _hatchInstId  = 0;  // unique id per chart instance for clip path refs
 
+// ── Symmetric-log tail scale ──────────────────────────────────────────────────
+// A plain log scale measures ratio, which is lopsided around a centre: ratios are
+// unbounded going up but bottom out at zero going down, so a log tail always
+// expands its small end. The symmetric quantity is DISTANCE OUTWARD from the
+// linear-window boundary — exactly what d3.scaleSymlog compresses. Each tail is a
+// real symlog fed boundary-relative distance, so BOTH tails compress outward by the
+// same law. The law is symmetric; the OUTPUT is not forced to be — a tail whose
+// data range is small stays near-linear, a tail with a huge range compresses hard.
+// True visual symmetry therefore appears only when the data is actually symmetric
+// (equal outlier range either side of a centred window); we never normalise the
+// constant to fake a mirror.
+
+// Pick the symlog constant C so the tail's slope at the boundary (distance 0) equals
+// the linear window's slope T (px per $): the represented density is continuous
+// across the seam, with no artificial jump, and C is *derived* from the data and
+// geometry rather than chosen to hit a look. d3's symlog boundary slope is
+// A / (C·ln(1 + S/C)) for range-width A over span S; it falls monotonically from
+// +∞ (C→0) to A/S (C→∞), so geometric-bisect for the unique C (or fall back to a
+// near-linear tail when the window is shallower than the tail's own average).
+function solveSymlogConstant(A, S, T) {
+  if (!(S > 0) || !(A > 0) || !(T > 0)) return 1;
+  if (T <= A / S) return S; // window shallower than the tail average → near-linear tail
+  const slopeAt = C => A / (C * Math.log1p(S / C));
+  let lo = S * 1e-9, hi = S * 1e9; // slopeAt(lo) ≫ T, slopeAt(hi) ≈ A/S < T
+  for (let i = 0; i < 80; i++) {
+    const mid = Math.sqrt(lo * hi); // C spans many orders of magnitude
+    if (slopeAt(mid) > T) lo = mid; else hi = mid;
+  }
+  return Math.sqrt(lo * hi);
+}
+
+function symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope) {
+  const span    = Math.abs(extreme - boundary) || 1;
+  const outward = Math.sign(extreme - boundary) || 1; // +1 right tail, −1 left tail
+  const base    = scaleSymlog().domain([0, span]).range([pBoundary, pExtreme]);
+  base.constant(solveSymlogConstant(Math.abs(pExtreme - pBoundary), span, windowSlope));
+
+  const scale      = x => base(outward * (x - boundary)); // feed distance from the boundary
+  scale.invert     = px => boundary + outward * base.invert(px);
+  scale.ticks      = n => base.ticks(n).map(d => boundary + outward * d);
+  scale.tickFormat = (n, s) => base.tickFormat(n, s);
+  scale.domain     = () => outward > 0 ? [boundary, extreme] : [extreme, boundary];
+  scale.range      = () => outward > 0 ? [pBoundary, pExtreme] : [pExtreme, pBoundary];
+  scale.copy       = () => symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope);
+  return scale;
+}
+
 function renderPiecewise(points, {
   width, height, window, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
@@ -82,15 +129,18 @@ function renderPiecewise(points, {
   const r2 = innerW * qHi;
   const r3 = innerW;
 
-  // scaleLog requires strictly positive domain values; clamp xMin away from zero
-  // so datasets with a $0 minimum don't break the log tail.
-  const logMin = xMin > 0 ? xMin : xMax * 1e-6;
-
-  const buildScales = (lo, hi, p1, p2) => ({
-    leftScale:  scaleLog().domain([logMin, lo]).range([r0, p1]),
-    midScale:   scaleLinear().domain([lo, hi]).range([p1, p2]),
-    rightScale: scaleLog().domain([hi, xMax]).range([p2, r3]),
-  });
+  // Both tails are symmetric symlogs anchored at the linear-window boundary, so
+  // small-value outliers on the left compress toward the left edge exactly as
+  // large-value outliers compress toward the right edge. symlog handles 0/negatives
+  // natively, so no positive-domain clamp is needed.
+  const buildScales = (lo, hi, p1, p2) => {
+    const windowSlope = (p2 - p1) / (hi - lo); // px per $ in the linear window
+    return {
+      leftScale:  symlogTail(lo,  xMin, p1, r0, windowSlope), // boundary lo→p1, extreme xMin→r0
+      midScale:   scaleLinear().domain([lo, hi]).range([p1, p2]),
+      rightScale: symlogTail(hi, xMax, p2, r3, windowSlope),  // boundary hi→p2, extreme xMax→r3
+    };
+  };
 
   let { leftScale, midScale, rightScale } = buildScales(xLo, xHi, r1, r2);
 
@@ -211,7 +261,7 @@ function renderPiecewise(points, {
     const leftG  = hatchGroup.append('g').attr('clip-path', `url(#hatch-left-${hatchInstId})`);
     const rightG = hatchGroup.append('g').attr('clip-path', `url(#hatch-right-${hatchInstId})`);
 
-    // Continuous, scale-driven hatch. A log tail is ONE continuous compression,
+    // Continuous, scale-driven hatch. A symlog tail is ONE continuous compression,
     // not N discrete steps — so instead of slicing the tail into fixed bands (which
     // reads as several separate "logs"), we place diagonal lines straight from the
     // scale. The local line spacing at a pixel is BASE_SPACING scaled by how steep
@@ -342,17 +392,18 @@ function renderPiecewise(points, {
     }
 
     function applyLeftDrag(px) {
-      // Full-range log scale — avoids exponential blowup when the left tail is
-      // tiny (small r1). scaleLog([logMin,xLo],[0,r1]).invert exponentiation by
-      // px/r1 is huge when r1 << px.
-      const raw = scaleLog().domain([logMin, currentXHi]).range([r0, currentR2]).invert(px);
-      const newXLo = Math.max(logMin + eps, raw);
+      // Position the new boundary by inverting a full-span symlog proxy over
+      // [r0, currentR2] → [xMin, currentXHi]. Using the full pixel span (not the
+      // tiny left tail) keeps the inverse bounded, and symlog handles a $0 xMin
+      // that scaleLog cannot.
+      const raw = scaleSymlog().domain([xMin, currentXHi]).range([r0, currentR2]).invert(px);
+      const newXLo = Math.max(xMin + eps, raw);
       applyState(newXLo, currentXHi, px, currentR2);
       return newXLo;
     }
 
     function applyRightDrag(px) {
-      const raw = scaleLog().domain([currentXLo, xMax]).range([currentR1, r3]).invert(px);
+      const raw = scaleSymlog().domain([currentXLo, xMax]).range([currentR1, r3]).invert(px);
       const newXHi = Math.min(xMax - eps, raw);
       applyState(currentXLo, newXHi, currentR1, px);
       return newXHi;
@@ -433,7 +484,7 @@ function renderPiecewise(points, {
         const rawDelta = (newR1 - panStartR1) * panRate;
         let newXLo = panStartXLo + rawDelta;
         let newXHi = panStartXHi + rawDelta;
-        if (newXLo < logMin + eps) { newXHi -= (newXLo - (logMin + eps)); newXLo = logMin + eps; }
+        if (newXLo < xMin + eps) { newXHi -= (newXLo - (xMin + eps)); newXLo = xMin + eps; }
         if (newXHi > xMax   - eps) { newXLo -= (newXHi - (xMax   - eps)); newXHi = xMax   - eps; }
         applyState(newXLo, newXHi, newR1, newR2);
       })
