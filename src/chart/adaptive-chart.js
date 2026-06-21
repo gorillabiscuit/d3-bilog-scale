@@ -230,38 +230,24 @@ function renderPiecewise(points, {
       .style('outline', 'none')
     .lower();
 
-  // Pan hints — pill badges spread across the linear section.
-  // Tiered: 3 badges for wide linear zones, 2 edge-only for medium, 1 center for narrow.
-  const hintFontSize = 10, hintPadY = 4;
+  // Pan hints — anchored to the chart edges (not the window handles), because
+  // edge-scroll activates when the window is dragged to the chart boundary.
+  const hintFontSize = 10, hintPadY = 4, hintPadX = 9;
   const hintH = hintFontSize + hintPadY * 2;
-  const linearW = r2 - r1;
-  const charW = 5.5;
-  // Edge badges use tighter padding (6px) so they fit in narrower linear zones.
-  const hw = (t, px) => t.length * charW + px * 2;
+  const hw = t => t.length * 5.5 + hintPadX * 2;
 
-  const EDGE_L = '← pan', EDGE_R = 'pan →', CENTER = 'drag to pan';
-  const EPX = 6, CPX = 9;  // edge and center horizontal padding
-  const wL = hw(EDGE_L, EPX), wR = hw(EDGE_R, EPX), wC = hw(CENTER, CPX);
+  const HINT_L = '← drag to pan', HINT_R = 'drag to pan →';
+  const wL = hw(HINT_L), wR = hw(HINT_R);
   const inset = 8;
 
-  const fits3 = linearW >= wL / 2 + inset + 12 + wC + 12 + inset + wR / 2;
-  const fits2 = linearW >= wL + wR + inset * 2 + 4;
-
-  const hints = [];
-  if (fits3) {
-    hints.push({ text: EDGE_L, px: EPX, x: r1 + wL / 2 + inset });
-    hints.push({ text: CENTER,  px: CPX, x: (r1 + r2) / 2 });
-    hints.push({ text: EDGE_R, px: EPX, x: r2 - wR / 2 - inset });
-  } else if (fits2) {
-    hints.push({ text: EDGE_L, px: EPX, x: r1 + wL / 2 + inset });
-    hints.push({ text: EDGE_R, px: EPX, x: r2 - wR / 2 - inset });
-  } else {
-    hints.push({ text: CENTER, px: CPX, x: (r1 + r2) / 2 });
-  }
+  const hints = [
+    { text: HINT_L, x: wL / 2 + inset },
+    { text: HINT_R, x: innerW - wR / 2 - inset },
+  ];
   const cy = innerH - hintH / 2 - 4;
 
   hints.forEach(s => {
-    const w = hw(s.text, s.px);
+    const w = hw(s.text);
     const hg = g.append('g').attr('pointer-events', 'none').style('opacity', 0.9);
     hg.append('rect')
       .attr('x', s.x - w / 2).attr('y', cy - hintH / 2)
