@@ -364,13 +364,13 @@ function renderPiecewise(points, {
       const a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
       const w = b - a;
       if (w < RULER_MIN_PX) break;
-      grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
-        .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
-        .attr('pointer-events', 'none');
       const post = outward > 0 ? b : a;
       grp.append('line').attr('x1', post).attr('x2', post).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
       if (w >= ARROW_MIN_PX) {
+        grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
+          .attr('pointer-events', 'none');
         arrow(a, b, 0.45);
         if (w >= TEXT_MIN_PX) label((a + b) / 2, `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`, 0.65);
       } else if (collapseAt === null) {
