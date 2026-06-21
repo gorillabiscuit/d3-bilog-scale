@@ -185,16 +185,16 @@ function renderPiecewise(points, {
     }, 3000);
   });
 
-  // Each equal domain-step band in the tail gets its own SVG <pattern> whose
-  // diagonal line spacing scales with that band's pixel width relative to the
-  // widest band in the same tail. The widest band (least compressed) always gets
-  // BASE_SPACING; narrower bands get proportionally tighter lines; bands whose
-  // spacing drops below LINE_MIN_PX merge into a solid fill.
+  // Each equal domain-step band in the tail gets diagonal <line> elements drawn
+  // directly into a per-band <clipPath>, avoiding SVG <pattern> entirely.
+  // Chrome's Blink renderer clips <pattern> content at tile boundaries even when
+  // overflow:visible is set, producing visible dots at every tile seam. Explicit
+  // <line> elements are single continuous SVG primitives with no tile seams.
   //
-  // Normalising to the widest band (not to linearW) ensures a visible gradient
-  // on datasets where the entire tail is highly compressed vs the linear window.
-  const BASE_SPACING = 8; // px between lines in the widest band
-  const LINE_MIN_PX  = 1; // spacing below this → solid fill
+  // Spacing scales with bandW / maxBandW: widest band → BASE_SPACING (sparsest),
+  // narrower bands → denser lines, below LINE_MIN_PX → solid fill.
+  const BASE_SPACING = 8; // px between lines in the widest (least-compressed) band
+  const LINE_MIN_PX  = 2; // spacing below this → solid fill
   const hatchGroup = g.append('g').attr('pointer-events', 'none');
   g.selectAll('circle').raise();
 
@@ -272,22 +272,28 @@ function renderPiecewise(points, {
           return;
         }
 
-        const id = `hp-${hatchInstId}-${prefix}${i}`;
-        svgDefs.append('pattern')
-          .attr('id', id)
-          .attr('patternUnits', 'userSpaceOnUse')
-          .attr('overflow', 'visible')
-          .attr('x', xLeft).attr('y', 0)
-          .attr('width', spacing).attr('height', spacing)
-          .append('line')
-            .attr('x1', -1).attr('y1', -1)
-            .attr('x2', spacing + 1).attr('y2', spacing + 1)
+        // Per-band clip path confines lines to this band's pixel rect.
+        // Chrome's Blink renderer clips <pattern> content at tile boundaries
+        // even with overflow:visible, so we avoid <pattern> entirely.
+        const clipId = `hp-${hatchInstId}-c${prefix}${i}`;
+        svgDefs.append('clipPath').attr('id', clipId)
+          .append('rect')
+          .attr('x', xLeft).attr('width', bandW)
+          .attr('y', 0).attr('height', innerH);
+
+        const bandG = g.append('g').attr('clip-path', `url(#${clipId})`);
+
+        // Draw full-height \ diagonal lines. Each line is a single continuous
+        // SVG primitive — no tile seams, no anti-aliasing endpoint artifacts.
+        // Start at xLeft-innerH so lines entering from the top-left of the
+        // band are included (covers the bottom-left corner of the band).
+        for (let x = xLeft - innerH; x <= xLeft + bandW; x += spacing) {
+          bandG.append('line')
+            .attr('x1', x).attr('y1', 0)
+            .attr('x2', x + innerH).attr('y2', innerH)
             .attr('stroke', tickColor).attr('stroke-opacity', 0.45)
             .attr('stroke-width', 1);
-        g.append('rect')
-          .attr('x', xLeft).attr('width', bandW)
-          .attr('y', 0).attr('height', innerH)
-          .attr('fill', `url(#${id})`);
+        }
 
         // Advance coverage edge toward the extreme.
         coverageEdge = isLeft ? xLeft : xLeft + bandW;
