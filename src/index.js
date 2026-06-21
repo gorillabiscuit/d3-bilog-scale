@@ -41,10 +41,6 @@ const datasetSelector = document.getElementById('dataset-selector');
 const alphaSlider     = document.getElementById('alpha-slider');
 const alphaValue      = document.getElementById('alpha-value');
 const themeToggle     = document.getElementById('theme-toggle');
-const dotSizeSelect   = document.getElementById('dot-size');
-const dotOpacitySlider= document.getElementById('dot-opacity');
-const dotOpacityValue = document.getElementById('dot-opacity-value');
-const tailTicksSlider = document.getElementById('tail-ticks');
 
 // ── App state ────────────────────────────────────────────────────────────────
 
@@ -54,9 +50,6 @@ let manualXLo = null, manualXHi = null;
 let manualQLo = null, manualQHi = null;
 
 let currentTheme = 'dark';
-let dotRadius    = undefined;   // undefined = auto
-let dotOpacity   = undefined;   // undefined = auto
-let tailTicks    = 6;
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -109,14 +102,16 @@ function renderExperimental() {
         manualXLo = xLo; manualXHi = xHi;
         if (qLo != null) manualQLo = qLo;
         if (qHi != null) manualQHi = qHi;
+        if (qLo != null && qHi != null) {
+          const w = qHi - qLo;
+          alphaSlider.value = w;
+          alphaValue.textContent = w.toFixed(2);
+        }
         renderExperimental();
       },
       xLabel, yLabel, xFormat, yFormat,
       // appearance
       ...theme,
-      dotRadius,
-      dotOpacity,
-      tailTicks,
       showLocalRate: true,
     })
   );
@@ -157,24 +152,6 @@ themeToggle.addEventListener('click', () => {
   currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', currentTheme);
   themeToggle.textContent = currentTheme === 'dark' ? '☀ Light' : '☾ Dark';
-  renderExperimental();
-});
-
-dotSizeSelect.addEventListener('change', () => {
-  const v = dotSizeSelect.value;
-  dotRadius = v === 'auto' ? undefined : +v;
-  renderExperimental();
-});
-
-dotOpacitySlider.addEventListener('input', () => {
-  const v = +dotOpacitySlider.value;
-  dotOpacityValue.textContent = v.toFixed(2);
-  dotOpacity = v === 0 ? undefined : v;
-  renderExperimental();
-});
-
-tailTicksSlider.addEventListener('change', () => {
-  tailTicks = tailTicksSlider.checked ? 6 : 0;
   renderExperimental();
 });
 
