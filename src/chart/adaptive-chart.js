@@ -184,19 +184,22 @@ function renderPiecewise(points, {
     }, 3000);
   });
 
-  // Diagonal hatch lines at equal dollar-step intervals across each tail.
-  // Lines are placed at window-span domain steps — identical to the bunched reference
-  // lines approach but drawn at 45° so they read as texture rather than ruler marks.
-  // Because the sub-scales are logarithmic, equal domain steps compress toward the
-  // extremes, making the hatching visibly denser where the scale is most compressed.
-  // When adjacent lines are sub-pixel apart we switch to a solid fill rectangle.
-  const HATCH_DX   = innerH; // 45° diagonal: x-offset equals chart height
+  // Each equal domain-step band in the tail gets its own SVG <pattern> whose
+  // diagonal line spacing scales with that band's pixel width relative to the
+  // widest band in the same tail. The widest band (least compressed) always gets
+  // BASE_SPACING; narrower bands get proportionally tighter lines; bands whose
+  // spacing drops below LINE_MIN_PX merge into a solid fill.
+  //
+  // Normalising to the widest band (not to linearW) ensures a visible gradient
+  // on datasets where the entire tail is highly compressed vs the linear window.
+  const BASE_SPACING = 8; // px between lines in the widest band
+  const LINE_MIN_PX  = 1; // spacing below this → solid fill
   const hatchGroup = g.append('g').attr('pointer-events', 'none');
-  // Raise dots above the hatch so data is always legible through the texture.
   g.selectAll('circle').raise();
 
   function redrawHatch(leftSub, rightSub) {
     hatchGroup.selectAll('*').remove();
+    svgDefs.selectAll(`[id^="hp-${hatchInstId}-"]`).remove();
 
     const [leftMin, curXLo] = leftSub.domain();
     const [curXHi, rightMax] = rightSub.domain();
@@ -204,68 +207,91 @@ function renderPiecewise(points, {
     const curR1 = leftSub.range()[1];
     const curR2 = rightSub.range()[0];
 
-    // Keep clip rects in sync with the current handle positions.
     leftClipRect.attr('width', curR1 - r0);
     rightClipRect.attr('x', curR2).attr('width', r3 - curR2);
 
     const leftG  = hatchGroup.append('g').attr('clip-path', `url(#hatch-left-${hatchInstId})`);
     const rightG = hatchGroup.append('g').attr('clip-path', `url(#hatch-right-${hatchInstId})`);
 
-    // Left tail — iterate inward from the boundary toward the extreme.
-    let prevPx = curR1;
-    let leftLines = 0;
-    for (let v = curXLo - windowSpan; v > leftMin; v -= windowSpan) {
-      const px = leftSub(v);
-      if (prevPx - px < BAND_MIN_PX) {
-        leftG.append('rect')
-          .attr('x', r0).attr('width', Math.max(1, px - r0))
-          .attr('y', 0).attr('height', innerH)
-          .attr('fill', tickColor).attr('fill-opacity', 0.22);
-        leftLines++;
-        break;
+    // Collect pixel bands for one tail, ordered from boundary inward toward extreme.
+    // stepDir is -1 for the left tail (v decreases) and +1 for the right tail (v increases).
+    function collectBands(sub, startDomain, stepDir, limitDomain) {
+      const bands = [];
+      let prevPx = sub(startDomain);
+      for (let v = startDomain + stepDir * windowSpan;
+           stepDir < 0 ? v > limitDomain : v < limitDomain;
+           v += stepDir * windowSpan) {
+        const px    = sub(v);
+        const xLeft = stepDir < 0 ? px : prevPx;
+        const bandW = Math.abs(px - prevPx);
+        if (bandW < BAND_MIN_PX) break;
+        bands.push({ xLeft, bandW });
+        prevPx = px;
       }
-      leftG.append('line')
-        .attr('x1', px).attr('y1', 0)
-        .attr('x2', px + HATCH_DX).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-opacity', 0.28).attr('stroke-width', 1);
-      prevPx = px;
-      leftLines++;
-    }
-    // When the entire tail is narrower than one window-width (too compressed for even
-    // one line), show a flat tint so it's still visually distinct from the linear region.
-    if (leftLines === 0 && curR1 - r0 > 1) {
-      leftG.append('rect')
-        .attr('x', r0).attr('width', curR1 - r0)
-        .attr('y', 0).attr('height', innerH)
-        .attr('fill', tickColor).attr('fill-opacity', 0.10);
+      return bands;
     }
 
-    // Right tail — iterate inward from the boundary toward the extreme.
-    prevPx = curR2;
-    let rightLines = 0;
-    for (let v = curXHi + windowSpan; v < rightMax; v += windowSpan) {
-      const px = rightSub(v);
-      if (px - prevPx < BAND_MIN_PX) {
-        rightG.append('rect')
-          .attr('x', prevPx).attr('width', Math.max(1, r3 - prevPx))
+    // Draw hatch bands. Each band's line spacing is proportional to its pixel
+    // width relative to the widest band, guaranteeing a visible density gradient.
+    function drawTailBands(g, prefix, bands, tailX, tailW) {
+      if (bands.length === 0) {
+        if (tailW > 1) {
+          g.append('rect')
+            .attr('x', tailX).attr('width', tailW)
+            .attr('y', 0).attr('height', innerH)
+            .attr('fill', tickColor).attr('fill-opacity', 0.10);
+        }
+        return;
+      }
+
+      const maxBandW = Math.max(...bands.map(b => b.bandW));
+      let solidX = null;
+
+      for (let i = 0; i < bands.length; i++) {
+        const { xLeft, bandW } = bands[i];
+        const spacing = BASE_SPACING * bandW / maxBandW;
+        if (spacing < LINE_MIN_PX) { solidX = xLeft; break; }
+
+        const id = `hp-${hatchInstId}-${prefix}${i}`;
+        svgDefs.append('pattern')
+          .attr('id', id)
+          .attr('patternUnits', 'userSpaceOnUse')
+          .attr('x', xLeft).attr('y', 0)
+          .attr('width', spacing).attr('height', spacing)
+          .append('line')
+            .attr('x1', 0).attr('y1', 0)
+            .attr('x2', spacing).attr('y2', spacing)
+            .attr('stroke', tickColor).attr('stroke-opacity', 0.35)
+            .attr('stroke-width', 1);
+        g.append('rect')
+          .attr('x', xLeft).attr('width', bandW)
+          .attr('y', 0).attr('height', innerH)
+          .attr('fill', `url(#${id})`);
+      }
+
+      // Solid fill covers any sub-pixel bands and the unstepped remnant at the extreme.
+      // For the left tail tailX=r0 (extreme), for the right tail tailX=curR2 (boundary).
+      const lastDrawnRight = solidX !== null
+        ? solidX
+        : bands[bands.length - 1].xLeft + bands[bands.length - 1].bandW;
+      const extremeLeft  = tailX < bands[0].xLeft; // true = left tail
+      const fillX = extremeLeft ? tailX : lastDrawnRight;
+      const fillW = extremeLeft
+        ? bands[0].xLeft - tailX          // extreme gap on the left
+        : (tailX + tailW) - lastDrawnRight; // extreme gap on the right
+      if (fillW > 0.5) {
+        g.append('rect')
+          .attr('x', fillX).attr('width', fillW)
           .attr('y', 0).attr('height', innerH)
           .attr('fill', tickColor).attr('fill-opacity', 0.22);
-        rightLines++;
-        break;
       }
-      rightG.append('line')
-        .attr('x1', px).attr('y1', 0)
-        .attr('x2', px + HATCH_DX).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-opacity', 0.28).attr('stroke-width', 1);
-      prevPx = px;
-      rightLines++;
     }
-    if (rightLines === 0 && r3 - curR2 > 1) {
-      rightG.append('rect')
-        .attr('x', curR2).attr('width', r3 - curR2)
-        .attr('y', 0).attr('height', innerH)
-        .attr('fill', tickColor).attr('fill-opacity', 0.10);
-    }
+
+    const leftBands  = collectBands(leftSub,  curXLo, -1, leftMin);
+    const rightBands = collectBands(rightSub, curXHi, +1, rightMax);
+
+    drawTailBands(leftG,  'l', leftBands,  r0,    curR1 - r0);
+    drawTailBands(rightG, 'r', rightBands, curR2, r3 - curR2);
   }
 
   redrawHatch(leftScale, rightScale);

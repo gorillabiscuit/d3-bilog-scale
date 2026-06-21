@@ -4,6 +4,12 @@ Decision log for the article. Timestamped one-liners only.
 
 ---
 
+- **[14:30]** Rejected uniform hatch lines across entire log tail: it recreates the bunched-lines look at 45° and communicates nothing new about per-region compression.
+- **[14:35]** Redesigned hatch texture to per-band density encoding: each equal-dollar-step section gets its own SVG `<pattern>` whose line spacing scales with that band's pixel width relative to the widest band in the tail — widest band = sparsest hatch (8px), narrower = denser, sub-1px = solid fill.
+- **[14:40]** Key insight that forced relative normalisation: absolute normalisation against linearW caused all bands to fall below the solid-fill threshold on datasets with highly-compressed tails (NYC property data: first right-tail band only 11.5px vs 113px linear window, giving 1.2px spacing before any pattern renders).
+
+---
+
 - **[session-start]** Defined the core problem: 200 small business loans where 84% cluster under $10K but 10 outliers reach $1.2M, making a naive linear scale useless for the majority.
 - **[research]** Chose to research 21 techniques across four categories (scale-transform, visual-encoding, interaction, layout) before committing to any implementation.
 - **[research]** Rejected `d3-scale-break` plugin as a dependency: only 4 GitHub stars, pre-1.0, last pushed January 2023 — effectively unmaintained.
