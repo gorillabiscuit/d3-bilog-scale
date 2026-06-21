@@ -8,9 +8,6 @@ import { createChart, makeFmt, MARGIN } from './base-chart.js';
 import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile } from '../scale/window.js';
 
-// Incrementing counter for unique linearGradient ids across chart instances.
-let _gradId = 0;
-
 export function createAdaptiveChart(points, {
   width = 900, height = 260,
   window = 0.5,
@@ -307,33 +304,12 @@ function renderPiecewise(points, {
 
   const updateLinearAnnot = makeAnnotation('linear');
 
-  // Each tail gets a linearGradient fill: transparent at the window boundary, fading to
-  // endOp at the extreme. endOp scales logarithmically with n_chunks = tailSpan / W —
-  // so a lightly-compressed tail (×0.5) is barely tinted while a heavily-compressed one
-  // (×17, ×124) approaches LINE_OP, matching the visual weight of a single post line.
-  // objectBoundingBox coords mean the gradient tracks the rect; only stop-opacity updates.
-  const LINE_OP       = 0.28; // 2× line stroke-opacity — fills need more than lines to match perceptually
-  const TINT_REF_CHUNKS = 10; // n_chunks at which gradient reaches LINE_OP
-  const tailEndOp = (tailSpan, W) =>
-    W > 0 ? LINE_OP * Math.min(1, Math.log1p(tailSpan / W) / Math.log1p(TINT_REF_CHUNKS)) : 0;
-  const gradId = `log-tint-${++_gradId}`;
-  const defs = select(node).select('defs');
-  const leftEndStop  = defs.append('linearGradient').attr('id', `${gradId}-l`)
-    .attr('x1', '1').attr('y1', '0').attr('x2', '0').attr('y2', '0')
-    .call(lg => { lg.append('stop').attr('offset', '0%').attr('stop-color', tickColor).attr('stop-opacity', 0); })
-    .append('stop').attr('offset', '100%').attr('stop-color', tickColor)
-    .attr('stop-opacity', tailEndOp(xLo - xMin, xHi - xLo));
-  const rightEndStop = defs.append('linearGradient').attr('id', `${gradId}-r`)
-    .attr('x1', '0').attr('y1', '0').attr('x2', '1').attr('y2', '0')
-    .call(lg => { lg.append('stop').attr('offset', '0%').attr('stop-color', tickColor).attr('stop-opacity', 0); })
-    .append('stop').attr('offset', '100%').attr('stop-color', tickColor)
-    .attr('stop-opacity', tailEndOp(xMax - xHi, xHi - xLo));
-  const leftTintRect  = g.append('rect').attr('y', 0).attr('height', innerH)
-    .attr('fill', `url(#${gradId}-l)`).attr('pointer-events', 'none')
-    .attr('x', r0).attr('width', r1 - r0).lower();
-  const rightTintRect = g.append('rect').attr('y', 0).attr('height', innerH)
-    .attr('fill', `url(#${gradId}-r)`).attr('pointer-events', 'none')
-    .attr('x', r2).attr('width', r3 - r2).lower();
+  // Per-chunk tint: the first W-chunk adjacent to the linear window is barely discernible;
+  // each outward chunk steps up slightly, encoding distance-from-window in fill density.
+  // Drawn inside drawTailRuler so the fills rebuild with the ruler on every drag.
+  const TINT_BASE = 0.02;   // barely visible for the first (innermost) chunk
+  const TINT_STEP = 0.012;  // opacity added per chunk outward
+  const TINT_MAX  = 0.10;   // ceiling so it never gets heavy
 
   // Tail rulers replace the hatch. The linear window's dollar width W is tiled across
   // each log tail: every chunk spans the SAME W dollars, so the symlog renders them at
@@ -379,7 +355,7 @@ function renderPiecewise(points, {
     // Each W-chunk is one linear window. Post at every boundary; an arrow on each chunk
     // wide enough; a "log ×1" label where text fits (×0.5 etc. on a clamped partial chunk).
     // Once a chunk is too small even for an arrow, remember where and stop labelling.
-    let collapseAt = null;
+    let collapseAt = null, collapseK = 0;
     for (let k = 0; k < 4000; k++) {
       const d0 = boundary + outward * k * W;
       let d1 = boundary + outward * (k + 1) * W;
@@ -392,10 +368,13 @@ function renderPiecewise(points, {
       grp.append('line').attr('x1', post).attr('x2', post).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
       if (w >= ARROW_MIN_PX) {
+        grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
+          .attr('pointer-events', 'none');
         arrow(a, b, 0.45);
         if (w >= TEXT_MIN_PX) label((a + b) / 2, `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`, 0.65);
       } else if (collapseAt === null) {
-        collapseAt = d0;
+        collapseAt = d0; collapseK = k;   // first chunk too small for even an arrow
       }
       if (beyond) break;
     }
@@ -406,6 +385,9 @@ function renderPiecewise(points, {
       const a = Math.min(sub(collapseAt), sub(extreme)), b = Math.max(sub(collapseAt), sub(extreme));
       const n = Math.abs(extreme - collapseAt) / W;
       if (n >= 1 && b - a > 1) {
+        grp.append('rect').attr('x', a).attr('width', b - a).attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + collapseK * TINT_STEP, TINT_MAX))
+          .attr('pointer-events', 'none');
         if (b - a >= 2 * RULER_HEAD + 2) arrow(a, b, 0.65);
         else grp.append('line').attr('x1', a).attr('x2', b).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
           .attr('stroke', tickColor).attr('stroke-opacity', 0.65).attr('stroke-width', 1);
@@ -437,10 +419,6 @@ function renderPiecewise(points, {
         .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
         .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
       updateLinearAnnot(newR1, newR2, newXLo, newXHi);
-      leftTintRect.attr('x', r0).attr('width', newR1 - r0);
-      rightTintRect.attr('x', newR2).attr('width', r3 - newR2);
-      leftEndStop.attr('stop-opacity',  tailEndOp(newXLo - xMin, newXHi - newXLo));
-      rightEndStop.attr('stop-opacity', tailEndOp(xMax - newXHi, newXHi - newXLo));
       drawTailRuler(leftRulerG,  leftScale,  newXLo, xMin, newXHi - newXLo);
       drawTailRuler(rightRulerG, rightScale, newXHi, xMax, newXHi - newXLo);
       onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
