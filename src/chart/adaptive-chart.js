@@ -149,6 +149,28 @@ function renderPiecewise(points, {
   // in place. leftScale/midScale/rightScale are reassigned on drag too (see applyState).
   let currentXLo = xLo, currentXHi = xHi, currentR1 = r1, currentR2 = r2;
 
+  // Fixed candidate pool over the whole data range. Because the VALUES never change, a
+  // pan slides each tick smoothly instead of re-rounding it every frame (the cause of
+  // the flicker). Log covers the low end finely; linear covers the high end finely
+  // (where a tail with a high-valued boundary expands and needs labels).
+  const tickPool = (() => {
+    const set = new Set();
+    const lop = xMin > 0 ? xMin : Math.max(1e-9, xMax * 1e-7);
+    scaleLog().domain([lop, xMax]).ticks(100).forEach(v => set.add(v));
+    scaleLinear().domain([0, xMax]).ticks(100).forEach(v => { if (v > 0) set.add(v); });
+    return [...set];
+  })();
+  // Niceness rank for de-confliction: 10ᵏ > 5·10ᵏ > 2·10ᵏ > other integer mantissa > rest,
+  // then by magnitude. Per-value (never position), so the kept set is stable under pan.
+  const tickPriority = v => {
+    if (!(v > 0)) return 0;
+    const e = Math.floor(Math.log10(v) + 1e-9);
+    const m = v / 10 ** e;
+    const r = Math.abs(m - 1) < 1e-6 ? 4 : Math.abs(m - 5) < 1e-6 ? 3
+            : Math.abs(m - 2) < 1e-6 ? 2 : Math.abs(m - Math.round(m)) < 1e-6 ? 1 : 0;
+    return r * 1000 + e;
+  };
+
   function xScale(v) {
     if (v <= currentXLo) return leftScale(v);
     if (v <= currentXHi) return midScale(v);
@@ -157,23 +179,23 @@ function renderPiecewise(points, {
   xScale.domain = () => [xMin, xMax];
   xScale.range  = () => [0, innerW];
   xScale.copy   = () => xScale;
-  xScale.ticks  = (count = 8) => {
-    const qlo = currentR1 / innerW, qhi = currentR2 / innerW;
-    const tl = qlo > 0 ? leftScale.ticks(Math.max(1, Math.round(count * qlo)))          : [];
-    const tm =           midScale.ticks(Math.max(1, Math.round(count * (qhi - qlo))));
-    const tr = qhi < 1 ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qhi))))   : [];
-    // Always include xMax so the axis labels the right data boundary.
-    // Then cull any tick whose pixel position is within 20px of the previous one —
-    // sub-scale boundaries and the explicit xMax can produce near-duplicates.
-    const raw = [...tl, ...tm, ...tr, xMax];
-    const MIN_TICK_PX = 20;
-    const culled = [];
-    let lastPx = -Infinity;
-    for (const v of raw) {
-      const px = xScale(v);
-      if (px - lastPx >= MIN_TICK_PX) { culled.push(v); lastPx = px; }
-    }
-    return culled;
+  xScale.ticks  = () => {
+    // Stable pool + the linear window's own adaptive ticks (for narrow windows), mapped
+    // through the current piecewise scale. Keep by niceness priority: a tick shows unless
+    // a ROUNDER one already sits within MIN_TICK_PX. Priority is per-value, so as the axis
+    // pans the round ticks always win and finer ones fill expanded regions — no flicker,
+    // no left-anchored reshuffling. (No greedy left-to-right cull, which reshuffles.)
+    const MIN_TICK_PX = 42;
+    const cands = new Set(tickPool);
+    midScale.ticks(10).forEach(v => cands.add(v));
+    cands.add(xMax);
+    const placed = [...cands]
+      .map(v => ({ v, px: xScale(v), pr: tickPriority(v) }))
+      .filter(c => c.px >= -1 && c.px <= innerW + 1)
+      .sort((a, b) => b.pr - a.pr);
+    const kept = [];
+    for (const c of placed) if (kept.every(k => Math.abs(k.px - c.px) >= MIN_TICK_PX)) kept.push(c);
+    return kept.sort((a, b) => a.px - b.px).map(c => c.v);
   };
   // Invert is needed for drag handles: pixel → domain value
   xScale.invert = px => {
