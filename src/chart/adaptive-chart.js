@@ -49,7 +49,6 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 // ── Piecewise mode ────────────────────────────────────────────────────────────
 
 const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
-const BAND_MIN_PX   = 2;  // hatch lines closer than this merge into solid fill
 let   _hatchInstId  = 0;  // unique id per chart instance for clip path refs
 
 function renderPiecewise(points, {
@@ -185,18 +184,17 @@ function renderPiecewise(points, {
     }, 3000);
   });
 
-  // Each equal domain-step band in the tail gets diagonal <line> elements drawn
-  // directly into a per-band <clipPath>, avoiding SVG <pattern> entirely.
-  // Chrome's Blink renderer clips <pattern> content at tile boundaries even when
-  // overflow:visible is set, producing visible dots at every tile seam. Explicit
-  // <line> elements are single continuous SVG primitives with no tile seams.
-  //
-  // Spacing scales with bandW / maxBandW: widest band → BASE_SPACING (sparsest),
-  // narrower bands → denser lines, below LINE_MIN_PX → solid fill.
-  const BASE_SPACING = 8; // px between lines in the widest (least-compressed) band
-  const LINE_MIN_PX  = 2; // spacing below this → solid fill
-  const hatchGroup = g.append('g').attr('pointer-events', 'none');
+  // Hatch is drawn as explicit diagonal <line> elements (never an SVG <pattern>):
+  // Blink clips pattern content at tile boundaries even with overflow:visible,
+  // dotting the hatch at every seam. The spacing of those lines is driven straight
+  // from the sub-scale (see fillTailHatch) so the texture density tracks the actual
+  // compression continuously — no discrete bands implying structure that isn't there.
+  const BASE_SPACING = 8; // px between lines where the tail is least compressed (boundary)
+  const LINE_MIN_PX  = 2; // lines closer than this merge into solid fill
+  // Raise circles above axes/gridlines, then append hatchGroup on top of everything.
+  // pointer-events="none" lets circles below receive hover events through the hatch overlay.
   g.selectAll('circle').raise();
+  const hatchGroup = g.append('g').attr('pointer-events', 'none');
 
   function redrawHatch(leftSub, rightSub) {
     hatchGroup.selectAll('*').remove();
@@ -204,7 +202,6 @@ function renderPiecewise(points, {
 
     const [leftMin, curXLo] = leftSub.domain();
     const [curXHi, rightMax] = rightSub.domain();
-    const windowSpan = curXHi - curXLo;
     const curR1 = leftSub.range()[1];
     const curR2 = rightSub.range()[0];
 
@@ -214,154 +211,60 @@ function renderPiecewise(points, {
     const leftG  = hatchGroup.append('g').attr('clip-path', `url(#hatch-left-${hatchInstId})`);
     const rightG = hatchGroup.append('g').attr('clip-path', `url(#hatch-right-${hatchInstId})`);
 
-    // Collect pixel bands for one tail, ordered from boundary inward toward extreme.
-    // stepDir is -1 for the left tail (v decreases) and +1 for the right tail (v increases).
-    function collectBands(sub, startDomain, stepDir, limitDomain) {
-      const bands = [];
-      let prevPx = sub(startDomain);
-      for (let v = startDomain + stepDir * windowSpan;
-           stepDir < 0 ? v > limitDomain : v < limitDomain;
-           v += stepDir * windowSpan) {
-        const px    = sub(v);
-        const xLeft = stepDir < 0 ? px : prevPx;
-        const bandW = Math.abs(px - prevPx);
-        if (bandW < BAND_MIN_PX) break;
-        bands.push({ xLeft, bandW });
-        prevPx = px;
-      }
-      return bands;
-    }
+    // Continuous, scale-driven hatch. A log tail is ONE continuous compression,
+    // not N discrete steps — so instead of slicing the tail into fixed bands (which
+    // reads as several separate "logs"), we place diagonal lines straight from the
+    // scale. The local line spacing at a pixel is BASE_SPACING scaled by how steep
+    // the sub-scale is there relative to its boundary: even spacing where the tail is
+    // near-linear, bunching toward the extreme where it compresses, and solid fill
+    // where lines would pack tighter than LINE_MIN_PX. No bands, no seams — the
+    // density IS the scale, so it can never imply more structure than the data has.
+    function fillTailHatch(g, sub, boundary, extreme, tailX, tailW) {
+      const span = Math.abs(extreme - boundary);
+      if (span <= 0 || tailW <= 1) return;
+      const outward = Math.sign(extreme - boundary) || 1;
+      const probeD  = span * 1e-6;                              // domain epsilon for slopes
+      const bSlope  = Math.abs(sub(boundary + outward * probeD) - sub(boundary)) / probeD;
+      if (!(bSlope > 0)) return;
 
-    // Left tail: log scale places smallest values (near leftMin) in the WIDEST pixel
-    // bands (log expands small values). Starting from leftMin outward finds wide bands
-    // first; starting from curXLo finds narrow bands first and breaks immediately.
-    // Collect wide-to-narrow, then reverse for boundary-nearest-first ordering.
-    function collectLeftBands(sub, leftMin, curXLo, step) {
-      const bands = [];
-      let prevPx = sub(leftMin);
-      for (let v = leftMin + step; v < curXLo; v += step) {
-        const px    = sub(v);
-        const bandW = px - prevPx;
-        if (bandW < BAND_MIN_PX) break;
-        bands.push({ xLeft: prevPx, bandW });
-        prevPx = px;
-      }
-      bands.reverse();  // boundary-nearest first, consistent with drawTailBands contract
-      return bands;
-    }
+      const lo = tailX, hi = tailX + tailW;                    // tail's pixel extent
 
-    // Draw hatch bands. Each band's line spacing encodes compression:
-    //   Right tail: widest band = boundary-nearest = sparsest → bandW / maxBandW
-    //   Left tail:  narrowest band = boundary-nearest = sparsest → minBandW / bandW
-    // This gives mirror-symmetric density gradients: sparse at each boundary,
-    // dense at each extreme, regardless of log-scale direction.
-    // `coverageEdge` tracks where drawn coverage ends so the solid-fill remnant
-    // is placed correctly for both left (right→left) and right (left→right) tails.
-    function drawTailBands(g, prefix, bands, tailX, tailW) {
-      if (bands.length === 0) {
-        if (tailW > 1) {
-          g.append('rect')
-            .attr('x', tailX).attr('width', tailW)
+      // px-per-$ at pixel x ÷ px-per-$ at the boundary → local spacing in px.
+      const spacingAt = px => {
+        const v = sub.invert(Math.max(lo, Math.min(hi, px)));
+        const s = Math.abs(sub(v + probeD) - sub(v - probeD)) / (2 * probeD);
+        return s > 0 ? BASE_SPACING * s / bSlope : BASE_SPACING;
+      };
+      const drawSolid = (a, b) => {
+        const x0 = Math.max(lo, Math.min(a, b)), x1 = Math.min(hi, Math.max(a, b));
+        if (x1 - x0 > 0.5) {
+          g.append('rect').attr('x', x0).attr('width', x1 - x0)
             .attr('y', 0).attr('height', innerH)
-            .attr('fill', tickColor).attr('fill-opacity', 0.10);
+            .attr('fill', tickColor).attr('fill-opacity', 0.45);
         }
-        return;
-      }
+      };
 
-      const isLeft    = tailX < bands[0].xLeft; // left tail: extreme is to the left of all bands
-      const maxBandW  = Math.max(...bands.map(b => b.bandW));
-      const minBandW  = Math.min(...bands.map(b => b.bandW));
-      // For left tail, coverageEdge starts at the right edge of the boundary-nearest
-      // collected band. For right tail, it starts at the left edge of the same.
-      let coverageEdge = isLeft ? bands[0].xLeft + bands[0].bandW : bands[0].xLeft;
-
-      // Left tail: the most-compressed region sits between the last collected band
-      // and the boundary (curR1 = tailX + tailW). These bands are too narrow to
-      // hatch → solid fill the gap so it reads as "maximally compressed".
-      if (isLeft) {
-        const gapX = coverageEdge;
-        const gapW = (tailX + tailW) - gapX;
-        if (gapW > 0.5) {
-          g.append('rect')
-            .attr('x', gapX).attr('width', gapW)
-            .attr('y', 0).attr('height', innerH)
-            .attr('fill', tickColor).attr('fill-opacity', 0.50);
+      // Walk the tail left→right, starting one innerH early so the 45° lines cover
+      // the bottom-left corner; the tail clip trims the overhang.
+      let x = lo - innerH, solidStart = null, guard = 0;
+      while (x <= hi && guard++ < 8000) {
+        const sp = spacingAt(x);
+        if (sp < LINE_MIN_PX) {                                // too dense to resolve → solid
+          if (solidStart === null) solidStart = x;
+          x += LINE_MIN_PX;
+          continue;
         }
+        if (solidStart !== null) { drawSolid(solidStart, x); solidStart = null; }
+        g.append('line')
+          .attr('x1', x).attr('y1', 0).attr('x2', x + innerH).attr('y2', innerH)
+          .attr('stroke', tickColor).attr('stroke-opacity', 0.45).attr('stroke-width', 1);
+        x += sp;
       }
-
-      for (let i = 0; i < bands.length; i++) {
-        const { xLeft, bandW } = bands[i];
-        // Left tail: boundary-nearest band is narrowest → assign it BASE_SPACING (sparsest).
-        // Right tail: boundary-nearest band is widest → assign it BASE_SPACING (sparsest).
-        const spacing = isLeft
-          ? BASE_SPACING * minBandW / bandW
-          : BASE_SPACING * bandW / maxBandW;
-
-        if (spacing < LINE_MIN_PX) {
-          // This band and all beyond are too compressed — solid fill the rest.
-          // For left tail: fill from extreme (tailX=r0) to this band's right edge.
-          // For right tail: fill from this band's left edge to extreme (tailX+tailW=r3).
-          const fillX = isLeft ? tailX : xLeft;
-          const fillW = isLeft ? (coverageEdge - tailX) : (tailX + tailW - xLeft);
-          if (fillW > 0.5) {
-            g.append('rect')
-              .attr('x', fillX).attr('width', fillW)
-              .attr('y', 0).attr('height', innerH)
-              .attr('fill', tickColor).attr('fill-opacity', 0.50);
-          }
-          return;
-        }
-
-        // Per-band clip path confines lines to this band's pixel rect.
-        // Chrome's Blink renderer clips <pattern> content at tile boundaries
-        // even with overflow:visible, so we avoid <pattern> entirely.
-        const clipId = `hp-${hatchInstId}-c${prefix}${i}`;
-        svgDefs.append('clipPath').attr('id', clipId)
-          .append('rect')
-          .attr('x', xLeft).attr('width', bandW)
-          .attr('y', 0).attr('height', innerH);
-
-        const bandG = g.append('g').attr('clip-path', `url(#${clipId})`);
-
-        // Draw full-height \ diagonal lines. Each line is a single continuous
-        // SVG primitive — no tile seams, no anti-aliasing endpoint artifacts.
-        // Start at xLeft-innerH so lines entering from the top-left of the
-        // band are included (covers the bottom-left corner of the band).
-        for (let x = xLeft - innerH; x <= xLeft + bandW; x += spacing) {
-          bandG.append('line')
-            .attr('x1', x).attr('y1', 0)
-            .attr('x2', x + innerH).attr('y2', innerH)
-            .attr('stroke', tickColor).attr('stroke-opacity', 0.45)
-            .attr('stroke-width', 1);
-        }
-
-        // Advance coverage edge toward the extreme.
-        coverageEdge = isLeft ? xLeft : xLeft + bandW;
-      }
-
-      // Solid fill for the unstepped remnant between the last band and the extreme.
-      const remX = isLeft ? tailX : coverageEdge;
-      const remW = isLeft ? (coverageEdge - tailX) : (tailX + tailW - coverageEdge);
-      if (remW > 0.5) {
-        g.append('rect')
-          .attr('x', remX).attr('width', remW)
-          .attr('y', 0).attr('height', innerH)
-          .attr('fill', tickColor).attr('fill-opacity', 0.50);
-      }
+      if (solidStart !== null) drawSolid(solidStart, hi);
     }
 
-    // Left tail domain may be smaller than windowSpan (e.g. when the linear window
-    // is panned far right). Target ~6 visible bands regardless of tail width.
-    // Left tail: use windowSpan as step if it fits; otherwise divide the domain
-    // into ~6 equal slices. collectLeftBands iterates from extreme toward boundary
-    // (where bands are widest) and reverses the result for boundary-first ordering.
-    const leftTailDomain = curXLo - leftMin;
-    const leftStep = leftTailDomain > windowSpan ? windowSpan : leftTailDomain / 6;
-    const leftBands  = collectLeftBands(leftSub, leftMin, curXLo, leftStep);
-    const rightBands = collectBands(rightSub, curXHi, +1, rightMax);
-
-    drawTailBands(leftG,  'l', leftBands,  r0,    curR1 - r0);
-    drawTailBands(rightG, 'r', rightBands, curR2, r3 - curR2);
+    fillTailHatch(leftG,  leftSub,  curXLo, leftMin,  r0,    curR1 - r0);
+    fillTailHatch(rightG, rightSub, curXHi, rightMax, curR2, r3 - curR2);
   }
 
   redrawHatch(leftScale, rightScale);
