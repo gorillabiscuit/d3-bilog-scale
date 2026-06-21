@@ -385,9 +385,11 @@ function renderPiecewise(points, {
       const a = Math.min(sub(collapseAt), sub(extreme)), b = Math.max(sub(collapseAt), sub(extreme));
       const n = Math.abs(extreme - collapseAt) / W;
       if (n >= 1 && b - a > 1) {
-        grp.append('rect').attr('x', a).attr('width', b - a).attr('y', 0).attr('height', innerH)
-          .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + collapseK * TINT_STEP, TINT_MAX))
-          .attr('pointer-events', 'none');
+        // Pack the collapsed zone with lines at the break density — same visual weight
+        // as the individual chunks would have if they were still resolvable.
+        for (let x = a; x <= b; x += RULER_MIN_PX)
+          grp.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', innerH)
+            .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
         if (b - a >= 2 * RULER_HEAD + 2) arrow(a, b, 0.65);
         else grp.append('line').attr('x1', a).attr('x2', b).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
           .attr('stroke', tickColor).attr('stroke-opacity', 0.65).attr('stroke-width', 1);
