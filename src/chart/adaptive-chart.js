@@ -424,19 +424,13 @@ function renderPiecewise(points, {
     }
 
     function applyLeftDrag(px) {
-      // Position the new boundary by inverting a full-span symlog proxy over
-      // [r0, currentR2] → [xMin, currentXHi]. Using the full pixel span (not the
-      // tiny left tail) keeps the inverse bounded, and symlog handles a $0 xMin
-      // that scaleLog cannot.
-      const raw = scaleSymlog().domain([xMin, currentXHi]).range([r0, currentR2]).invert(px);
-      const newXLo = Math.max(xMin + eps, raw);
+      const newXLo = Math.max(xMin + eps, xScale.invert(px));
       applyState(newXLo, currentXHi, px, currentR2);
       return newXLo;
     }
 
     function applyRightDrag(px) {
-      const raw = scaleSymlog().domain([currentXLo, xMax]).range([currentR1, r3]).invert(px);
-      const newXHi = Math.min(xMax - eps, raw);
+      const newXHi = Math.min(xMax - eps, xScale.invert(px));
       applyState(currentXLo, newXHi, currentR1, px);
       return newXHi;
     }
