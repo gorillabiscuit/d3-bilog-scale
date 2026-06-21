@@ -304,6 +304,10 @@ function renderPiecewise(points, {
 
   const updateLinearAnnot = makeAnnotation('linear');
 
+  const TINT_BASE = 0.02;   // fill opacity of the first (innermost) arrow chunk
+  const TINT_STEP = 0.012;  // opacity added per chunk outward
+  const TINT_MAX  = 0.10;   // ceiling
+
   // Tail rulers replace the hatch. The linear window's dollar width W is tiled across
   // each log tail: every chunk spans the SAME W dollars, so the symlog renders them at
   // shrinking widths toward the extreme. Each chunk boundary gets a full-height post —
@@ -348,7 +352,7 @@ function renderPiecewise(points, {
     // Each W-chunk is one linear window. Post at every boundary; an arrow on each chunk
     // wide enough; a "log ×1" label where text fits (×0.5 etc. on a clamped partial chunk).
     // Once a chunk is too small even for an arrow, remember where and stop labelling.
-    let collapseAt = null;
+    let collapseAt = null, collapseK = 0;
     for (let k = 0; k < 4000; k++) {
       const d0 = boundary + outward * k * W;
       let d1 = boundary + outward * (k + 1) * W;
@@ -361,10 +365,13 @@ function renderPiecewise(points, {
       grp.append('line').attr('x1', post).attr('x2', post).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
       if (w >= ARROW_MIN_PX) {
+        grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
+          .attr('pointer-events', 'none');
         arrow(a, b, 0.45);
         if (w >= TEXT_MIN_PX) label((a + b) / 2, `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`, 0.65);
       } else if (collapseAt === null) {
-        collapseAt = d0;
+        collapseAt = d0; collapseK = k;
       }
       if (beyond) break;
     }
@@ -375,8 +382,10 @@ function renderPiecewise(points, {
       const a = Math.min(sub(collapseAt), sub(extreme)), b = Math.max(sub(collapseAt), sub(extreme));
       const n = Math.abs(extreme - collapseAt) / W;
       if (n >= 1 && b - a > 1) {
-        // Pack the collapsed zone with lines at the break density — same visual weight
-        // as the individual chunks would have if they were still resolvable.
+        // Fill matches the last visible arrow chunk so there's no opacity jump at the boundary.
+        const fillOp = Math.min(TINT_BASE + Math.max(0, collapseK - 1) * TINT_STEP, TINT_MAX);
+        grp.append('rect').attr('x', a).attr('width', b - a).attr('y', 0).attr('height', innerH)
+          .attr('fill', tickColor).attr('fill-opacity', fillOp).attr('pointer-events', 'none');
         for (let x = a; x <= b; x += RULER_MIN_PX)
           grp.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', innerH)
             .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
