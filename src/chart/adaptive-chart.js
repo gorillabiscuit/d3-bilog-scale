@@ -386,11 +386,15 @@ function renderPiecewise(points, {
       if (n >= 1 && b - a > 1) {
         const subEdge = boundary + outward * (lastDrawnK + 1) * W;
         const sa = Math.min(sub(subEdge), sub(extreme)), sb = Math.max(sub(subEdge), sub(extreme));
-        if (sb > sa)
+        if (sb > sa) {
           grp.append('rect').attr('x', sa).attr('width', sb - sa).attr('y', 0).attr('height', innerH)
             .attr('fill', tickColor)
             .attr('fill-opacity', Math.min(TINT_BASE + Math.max(0, lastDrawnK) * TINT_STEP, TINT_MAX))
             .attr('pointer-events', 'none');
+          for (let x = sa; x <= sb; x += RULER_MIN_PX)
+            grp.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', innerH)
+              .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
+        }
         if (b - a >= 2 * RULER_HEAD + 2) arrow(a, b, 0.65);
         else grp.append('line').attr('x1', a).attr('x2', b).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
           .attr('stroke', tickColor).attr('stroke-opacity', 0.65).attr('stroke-width', 1);
