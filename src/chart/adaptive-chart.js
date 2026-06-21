@@ -391,7 +391,10 @@ function renderPiecewise(points, {
             .attr('fill', tickColor)
             .attr('fill-opacity', Math.min(TINT_BASE + Math.max(0, lastDrawnK) * TINT_STEP, TINT_MAX))
             .attr('pointer-events', 'none');
-          for (let x = sa; x <= sb; x += RULER_MIN_PX)
+          // Skip one step at the seam: the last drawn chunk already has a post there.
+          const denseStart = outward > 0 ? sa + RULER_MIN_PX : sa;
+          const denseEnd   = outward > 0 ? sb : sb - RULER_MIN_PX;
+          for (let x = denseStart; x <= denseEnd; x += RULER_MIN_PX)
             grp.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', innerH)
               .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
         }
