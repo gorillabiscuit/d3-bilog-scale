@@ -240,9 +240,16 @@ function renderPiecewise(points, {
   const wL = hw(HINT_L), wR = hw(HINT_R);
   const inset = 8;
 
+  const wC = hw('drag to pan');
+  const centerX = (r1 + r2) / 2;
+  const leftEdgeR  = wL / 2 + inset + wL / 2;        // right edge of left badge
+  const rightEdgeL = innerW - wR / 2 - inset - wR / 2; // left edge of right badge
+  const showCenter = centerX - wC / 2 > leftEdgeR + 6 && centerX + wC / 2 < rightEdgeL - 6;
+
   const hints = [
-    { text: HINT_L, x: wL / 2 + inset },
-    { text: HINT_R, x: innerW - wR / 2 - inset },
+    { text: HINT_L,        x: wL / 2 + inset },
+    ...(showCenter ? [{ text: 'drag to pan', x: centerX }] : []),
+    { text: HINT_R,        x: innerW - wR / 2 - inset },
   ];
   const cy = innerH - hintH / 2 - 4;
 
