@@ -349,10 +349,10 @@ function renderPiecewise(points, {
         .text(value);
     };
 
-    // Each W-chunk is one linear window. Post at every boundary; an arrow on each chunk
-    // wide enough; a "log ×1" label where text fits (×0.5 etc. on a clamped partial chunk).
-    // Once a chunk is too small even for an arrow, remember where and stop labelling.
-    let collapseAt = null, collapseK = 0;
+    // Each W-chunk is one linear window. Every chunk gets a fill (arrow chunks also get an
+    // arrow+label; post-only chunks just get the fill and post). The fill gradient runs
+    // continuously across both types so there is no visual break at the arrow→post transition.
+    let collapseAt = null, lastDrawnK = -1;
     for (let k = 0; k < 4000; k++) {
       const d0 = boundary + outward * k * W;
       let d1 = boundary + outward * (k + 1) * W;
@@ -361,34 +361,36 @@ function renderPiecewise(points, {
       const a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
       const w = b - a;
       if (w < RULER_MIN_PX) break;
+      grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
+        .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
+        .attr('pointer-events', 'none');
       const post = outward > 0 ? b : a;
       grp.append('line').attr('x1', post).attr('x2', post).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
       if (w >= ARROW_MIN_PX) {
-        grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
-          .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
-          .attr('pointer-events', 'none');
         arrow(a, b, 0.45);
         if (w >= TEXT_MIN_PX) label((a + b) / 2, `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`, 0.65);
       } else if (collapseAt === null) {
-        collapseAt = d0; collapseK = k;
+        collapseAt = d0;
       }
+      lastDrawnK = k;
       if (beyond) break;
     }
 
-    // The remaining compressed chunks collapse into ONE arrow — "all the extra logs" —
-    // labelled with how many linear windows it stands for (the count comes from the scale).
+    // Sub-RULER_MIN_PX chunks are too small to draw individually. Fill that remaining region
+    // at the same opacity as the last drawn chunk (seamless gradient continuation), then
+    // annotate the entire post-only + sub-px zone with a single collapse arrow.
     if (collapseAt !== null) {
       const a = Math.min(sub(collapseAt), sub(extreme)), b = Math.max(sub(collapseAt), sub(extreme));
       const n = Math.abs(extreme - collapseAt) / W;
       if (n >= 1 && b - a > 1) {
-        // Fill matches the last visible arrow chunk so there's no opacity jump at the boundary.
-        const fillOp = Math.min(TINT_BASE + Math.max(0, collapseK - 1) * TINT_STEP, TINT_MAX);
-        grp.append('rect').attr('x', a).attr('width', b - a).attr('y', 0).attr('height', innerH)
-          .attr('fill', tickColor).attr('fill-opacity', fillOp).attr('pointer-events', 'none');
-        for (let x = a; x <= b; x += RULER_MIN_PX)
-          grp.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', innerH)
-            .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
+        const subEdge = boundary + outward * (lastDrawnK + 1) * W;
+        const sa = Math.min(sub(subEdge), sub(extreme)), sb = Math.max(sub(subEdge), sub(extreme));
+        if (sb > sa)
+          grp.append('rect').attr('x', sa).attr('width', sb - sa).attr('y', 0).attr('height', innerH)
+            .attr('fill', tickColor)
+            .attr('fill-opacity', Math.min(TINT_BASE + Math.max(0, lastDrawnK) * TINT_STEP, TINT_MAX))
+            .attr('pointer-events', 'none');
         if (b - a >= 2 * RULER_HEAD + 2) arrow(a, b, 0.65);
         else grp.append('line').attr('x1', a).attr('x2', b).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
           .attr('stroke', tickColor).attr('stroke-opacity', 0.65).attr('stroke-width', 1);
