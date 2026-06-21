@@ -2,6 +2,7 @@ import { scaleLinear, scaleLog, scaleSymlog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
+import { axisBottom } from 'd3-axis';
 import { createChart, makeFmt, MARGIN } from './base-chart.js';
 import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile } from '../scale/window.js';
@@ -49,7 +50,6 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 // ── Piecewise mode ────────────────────────────────────────────────────────────
 
 const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
-let   _hatchInstId  = 0;  // unique id per chart instance for clip path refs
 
 // ── Symmetric-log tail scale ──────────────────────────────────────────────────
 // A plain log scale measures ratio, which is lopsided around a centre: ratios are
@@ -144,18 +144,23 @@ function renderPiecewise(points, {
 
   let { leftScale, midScale, rightScale } = buildScales(xLo, xHi, r1, r2);
 
+  // Mutable window state the scale reads, so a drag can update the scale (and the axis)
+  // in place. leftScale/midScale/rightScale are reassigned on drag too (see applyState).
+  let currentXLo = xLo, currentXHi = xHi, currentR1 = r1, currentR2 = r2;
+
   function xScale(v) {
-    if (v <= xLo) return leftScale(v);
-    if (v <= xHi) return midScale(v);
+    if (v <= currentXLo) return leftScale(v);
+    if (v <= currentXHi) return midScale(v);
     return rightScale(v);
   }
   xScale.domain = () => [xMin, xMax];
   xScale.range  = () => [0, innerW];
   xScale.copy   = () => xScale;
   xScale.ticks  = (count = 8) => {
-    const tl = qLo > 0 ? leftScale.ticks(Math.max(1, Math.round(count * qLo)))          : [];
-    const tm =            midScale.ticks(Math.max(1, Math.round(count * (qHi - qLo))));
-    const tr = qHi < 1 ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qHi))))   : [];
+    const qlo = currentR1 / innerW, qhi = currentR2 / innerW;
+    const tl = qlo > 0 ? leftScale.ticks(Math.max(1, Math.round(count * qlo)))          : [];
+    const tm =           midScale.ticks(Math.max(1, Math.round(count * (qhi - qlo))));
+    const tr = qhi < 1 ? rightScale.ticks(Math.max(1, Math.round(count * (1 - qhi))))   : [];
     // Always include xMax so the axis labels the right data boundary.
     // Then cull any tick whose pixel position is within 20px of the previous one —
     // sub-scale boundaries and the explicit xMax can produce near-duplicates.
@@ -172,25 +177,21 @@ function renderPiecewise(points, {
   // Invert is needed for drag handles: pixel → domain value
   xScale.invert = px => {
     const p = Math.max(r0, Math.min(r3, px));
-    if (p <= r1) return leftScale.invert(p);
-    if (p <= r2) return midScale.invert(p);
+    if (p <= currentR1) return leftScale.invert(p);
+    if (p <= currentR2) return midScale.invert(p);
     return rightScale.invert(p);
   };
   // d3-axis calls scale.tickFormat(count, specifier) when no explicit formatter is set.
   // Delegate to the linear mid-section — it determines the "natural" numeric precision.
   xScale.tickFormat = (count, specifier) => midScale.tickFormat(count, specifier);
 
+  // Held for redrawing the x-axis live on drag (mirrors base-chart's styling).
+  const xFmt          = makeFmt(xFormat);
+  const axisColor     = options.axisColor ?? '#3a3a6a';
+  const axisTextColor = options.axisTextColor ?? '#a0a0c0';
+
   const node = createChart(points, xScale, { width, height, xFormat, ...options });
   const g = select(node).select('g');
-
-  // Per-instance clip paths so diagonal hatch lines don't bleed into the linear region.
-  // Rect dimensions are updated dynamically by redrawHatch on every drag event.
-  const hatchInstId   = ++_hatchInstId;
-  const svgDefs       = select(node).select('defs');
-  const leftClipRect  = svgDefs.append('clipPath').attr('id', `hatch-left-${hatchInstId}`)
-    .append('rect').attr('x', r0).attr('y', 0).attr('width', r1 - r0).attr('height', innerH);
-  const rightClipRect = svgDefs.append('clipPath').attr('id', `hatch-right-${hatchInstId}`)
-    .append('rect').attr('x', r2).attr('y', 0).attr('width', r3 - r2).attr('height', innerH);
 
   // Overlay on linear region — lowered below dots so dots still get pointer
   // events for tooltips. Drag is attached here so clicks on empty space in the
@@ -234,90 +235,8 @@ function renderPiecewise(points, {
     }, 3000);
   });
 
-  // Hatch is drawn as explicit diagonal <line> elements (never an SVG <pattern>):
-  // Blink clips pattern content at tile boundaries even with overflow:visible,
-  // dotting the hatch at every seam. The spacing of those lines is driven straight
-  // from the sub-scale (see fillTailHatch) so the texture density tracks the actual
-  // compression continuously — no discrete bands implying structure that isn't there.
-  const BASE_SPACING = 8; // px between lines where the tail is least compressed (boundary)
-  const LINE_MIN_PX  = 2; // lines closer than this merge into solid fill
-  // Raise circles above axes/gridlines, then append hatchGroup on top of everything.
-  // pointer-events="none" lets circles below receive hover events through the hatch overlay.
+  // Lift dots above the axes/gridlines drawn by createChart.
   g.selectAll('circle').raise();
-  const hatchGroup = g.append('g').attr('pointer-events', 'none');
-
-  function redrawHatch(leftSub, rightSub) {
-    hatchGroup.selectAll('*').remove();
-    svgDefs.selectAll(`[id^="hp-${hatchInstId}-"]`).remove();
-
-    const [leftMin, curXLo] = leftSub.domain();
-    const [curXHi, rightMax] = rightSub.domain();
-    const curR1 = leftSub.range()[1];
-    const curR2 = rightSub.range()[0];
-
-    leftClipRect.attr('width', curR1 - r0);
-    rightClipRect.attr('x', curR2).attr('width', r3 - curR2);
-
-    const leftG  = hatchGroup.append('g').attr('clip-path', `url(#hatch-left-${hatchInstId})`);
-    const rightG = hatchGroup.append('g').attr('clip-path', `url(#hatch-right-${hatchInstId})`);
-
-    // Continuous, scale-driven hatch. A symlog tail is ONE continuous compression,
-    // not N discrete steps — so instead of slicing the tail into fixed bands (which
-    // reads as several separate "logs"), we place diagonal lines straight from the
-    // scale. The local line spacing at a pixel is BASE_SPACING scaled by how steep
-    // the sub-scale is there relative to its boundary: even spacing where the tail is
-    // near-linear, bunching toward the extreme where it compresses, and solid fill
-    // where lines would pack tighter than LINE_MIN_PX. No bands, no seams — the
-    // density IS the scale, so it can never imply more structure than the data has.
-    function fillTailHatch(g, sub, boundary, extreme, tailX, tailW) {
-      const span = Math.abs(extreme - boundary);
-      if (span <= 0 || tailW <= 1) return;
-      const outward = Math.sign(extreme - boundary) || 1;
-      const probeD  = span * 1e-6;                              // domain epsilon for slopes
-      const bSlope  = Math.abs(sub(boundary + outward * probeD) - sub(boundary)) / probeD;
-      if (!(bSlope > 0)) return;
-
-      const lo = tailX, hi = tailX + tailW;                    // tail's pixel extent
-
-      // px-per-$ at pixel x ÷ px-per-$ at the boundary → local spacing in px.
-      const spacingAt = px => {
-        const v = sub.invert(Math.max(lo, Math.min(hi, px)));
-        const s = Math.abs(sub(v + probeD) - sub(v - probeD)) / (2 * probeD);
-        return s > 0 ? BASE_SPACING * s / bSlope : BASE_SPACING;
-      };
-      const drawSolid = (a, b) => {
-        const x0 = Math.max(lo, Math.min(a, b)), x1 = Math.min(hi, Math.max(a, b));
-        if (x1 - x0 > 0.5) {
-          g.append('rect').attr('x', x0).attr('width', x1 - x0)
-            .attr('y', 0).attr('height', innerH)
-            .attr('fill', tickColor).attr('fill-opacity', 0.45);
-        }
-      };
-
-      // Walk the tail left→right, starting one innerH early so the 45° lines cover
-      // the bottom-left corner; the tail clip trims the overhang.
-      let x = lo - innerH, solidStart = null, guard = 0;
-      while (x <= hi && guard++ < 8000) {
-        const sp = spacingAt(x);
-        if (sp < LINE_MIN_PX) {                                // too dense to resolve → solid
-          if (solidStart === null) solidStart = x;
-          x += LINE_MIN_PX;
-          continue;
-        }
-        if (solidStart !== null) { drawSolid(solidStart, x); solidStart = null; }
-        g.append('line')
-          .attr('x1', x).attr('y1', 0).attr('x2', x + innerH).attr('y2', innerH)
-          .attr('stroke', tickColor).attr('stroke-opacity', 0.45).attr('stroke-width', 1);
-        x += sp;
-      }
-      if (solidStart !== null) drawSolid(solidStart, hi);
-    }
-
-    fillTailHatch(leftG,  leftSub,  curXLo, leftMin,  r0,    curR1 - r0);
-    fillTailHatch(rightG, rightSub, curXHi, rightMax, curR2, r3 - curR2);
-  }
-
-  redrawHatch(leftScale, rightScale);
 
   // ── Region annotations ────────────────────────────────────────────────────
   // Permanent dimension-line annotations: one per scale region, always visible.
@@ -360,35 +279,125 @@ function renderPiecewise(points, {
     };
   }
 
-  const updateLeftAnnot   = makeAnnotation('log');
   const updateLinearAnnot = makeAnnotation('linear');
-  const updateRightAnnot  = makeAnnotation('log');
 
-  updateLeftAnnot(r0, r1, xMin, xLo);
+  // Each log tail gets a faint tint — a touch lighter than the linear section — so the
+  // regions stay visually distinct now that the hatch is gone. Lowered below the dots.
+  const TINT_OPACITY = 0.05;
+  const leftTintRect  = g.append('rect').attr('y', 0).attr('height', innerH)
+    .attr('fill', tickColor).attr('fill-opacity', TINT_OPACITY).attr('pointer-events', 'none')
+    .attr('x', r0).attr('width', r1 - r0).lower();
+  const rightTintRect = g.append('rect').attr('y', 0).attr('height', innerH)
+    .attr('fill', tickColor).attr('fill-opacity', TINT_OPACITY).attr('pointer-events', 'none')
+    .attr('x', r2).attr('width', r3 - r2).lower();
+
+  // Tail rulers replace the hatch. The linear window's dollar width W is tiled across
+  // each log tail: every chunk spans the SAME W dollars, so the symlog renders them at
+  // shrinking widths toward the extreme. Each chunk boundary gets a full-height post —
+  // the same vertical line the linear section has at its edge — and a chunk wide enough
+  // also gets a ←→ dimension arrow up top. As compression grows the arrows drop out but
+  // the posts remain and bunch. Because the symlog compresses monotonically, once a chunk
+  // is narrower than RULER_MIN_PX every later one is too, so we stop there — capping the
+  // posts at ~(tail width / RULER_MIN_PX), never thousands. Redrawn on every change.
+  const leftRulerG  = g.append('g').attr('pointer-events', 'none');
+  const rightRulerG = g.append('g').attr('pointer-events', 'none');
+  const RULER_HEAD   = 2.4;                // ~20% smaller heads → a couple more arrows fit
+  const ARROW_MIN_PX = 2 * RULER_HEAD + 9; // ~14px: room for a ←→ arrow
+  const TEXT_MIN_PX  = 20;                 // room for a stacked "log" / "×1" label
+  const RULER_MIN_PX = 2;                  // chunk narrower than this → stop (density cap)
+  // Multiplier formatter: SI for huge counts, a decimal when < 1 window, plain integers.
+  const fmtMult = n => n >= 1000 ? makeFmt('~s')(n)
+                     : n >= 10   ? Math.round(n).toString()
+                     : Number.isInteger(n) ? n.toString() : n.toFixed(1);
+  function drawTailRuler(grp, sub, boundary, extreme, W) {
+    grp.selectAll('*').remove();
+    if (!(W > 0) || boundary === extreme) return;
+    const outward = Math.sign(extreme - boundary) || 1;
+    const hy = 3;
+    const arrow = (a, b, op) => {
+      grp.append('line').attr('x1', a + RULER_HEAD).attr('x2', b - RULER_HEAD).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
+        .attr('stroke', tickColor).attr('stroke-opacity', op).attr('stroke-width', 1);
+      grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', op)
+        .attr('points', `${a},${ANNOT_Y} ${a + RULER_HEAD},${ANNOT_Y - hy} ${a + RULER_HEAD},${ANNOT_Y + hy}`);
+      grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', op)
+        .attr('points', `${b},${ANNOT_Y} ${b - RULER_HEAD},${ANNOT_Y - hy} ${b - RULER_HEAD},${ANNOT_Y + hy}`);
+    };
+    // Each section's label mirrors the linear annotation: italic "log" on top, value below.
+    const label = (x, value, valOp) => {
+      grp.append('text').attr('x', x).attr('y', 8).attr('text-anchor', 'middle')
+        .attr('fill', tickColor).attr('fill-opacity', 0.3).attr('font-size', '9px').attr('font-style', 'italic')
+        .text('log');
+      grp.append('text').attr('x', x).attr('y', ANNOT_Y - 2).attr('text-anchor', 'middle')
+        .attr('fill', tickColor).attr('fill-opacity', valOp).attr('font-size', '10px').attr('font-weight', '500')
+        .text(value);
+    };
+
+    // Each W-chunk is one linear window. Post at every boundary; an arrow on each chunk
+    // wide enough; a "log ×1" label where text fits (×0.5 etc. on a clamped partial chunk).
+    // Once a chunk is too small even for an arrow, remember where and stop labelling.
+    let collapseAt = null;
+    for (let k = 0; k < 4000; k++) {
+      const d0 = boundary + outward * k * W;
+      let d1 = boundary + outward * (k + 1) * W;
+      const beyond = outward > 0 ? d1 >= extreme : d1 <= extreme;
+      if (beyond) d1 = extreme;
+      const a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
+      const w = b - a;
+      if (w < RULER_MIN_PX) break;
+      const post = outward > 0 ? b : a;
+      grp.append('line').attr('x1', post).attr('x2', post).attr('y1', 0).attr('y2', innerH)
+        .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
+      if (w >= ARROW_MIN_PX) {
+        arrow(a, b, 0.45);
+        if (w >= TEXT_MIN_PX) label((a + b) / 2, `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`, 0.65);
+      } else if (collapseAt === null) {
+        collapseAt = d0;                  // first chunk too small for even an arrow
+      }
+      if (beyond) break;
+    }
+
+    // The remaining compressed chunks collapse into ONE arrow — "all the extra logs" —
+    // labelled with how many linear windows it stands for (the count comes from the scale).
+    if (collapseAt !== null) {
+      const a = Math.min(sub(collapseAt), sub(extreme)), b = Math.max(sub(collapseAt), sub(extreme));
+      const n = Math.abs(extreme - collapseAt) / W;
+      if (n >= 1 && b - a > 1) {
+        if (b - a >= 2 * RULER_HEAD + 2) arrow(a, b, 0.65);
+        else grp.append('line').attr('x1', a).attr('x2', b).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
+          .attr('stroke', tickColor).attr('stroke-opacity', 0.65).attr('stroke-width', 1);
+        label((a + b) / 2, `×${fmtMult(n)}`, 0.65);
+      }
+    }
+  }
+
   updateLinearAnnot(r1, r2, xLo, xHi);
-  updateRightAnnot(r2, r3, xHi, xMax);
+  drawTailRuler(leftRulerG,  leftScale,  xLo, xMin, xHi - xLo);
+  drawTailRuler(rightRulerG, rightScale, xHi, xMax, xHi - xLo);
 
   // ── Drag handles ─────────────────────────────────────────────────────────────
   if (onWindowChange) {
     const circles = g.selectAll('circle');
 
-    let currentXLo = xLo, currentXHi = xHi;
-    let currentR1  = r1,  currentR2  = r2;
-
     function applyState(newXLo, newXHi, newR1, newR2) {
-      const s = buildScales(newXLo, newXHi, newR1, newR2);
-      const ls = v => v <= newXLo ? s.leftScale(v) : v <= newXHi ? s.midScale(v) : s.rightScale(v);
-      circles.attr('cx', d => ls(d.x));
+      // Reassign the scale state xScale closes over, then everything reads the new window.
+      ({ leftScale, midScale, rightScale } = buildScales(newXLo, newXHi, newR1, newR2));
+      currentXLo = newXLo; currentXHi = newXHi;
+      currentR1  = newR1;  currentR2  = newR2;
+      circles.attr('cx', d => xScale(d.x));
       overlay.attr('x', newR1).attr('width', Math.max(0, newR2 - newR1));
       leftHandle?.attr('transform',  `translate(${newR1},0)`);
       rightHandle?.attr('transform', `translate(${newR2},0)`);
-      redrawHatch(s.leftScale, s.rightScale);
-      updateLeftAnnot(r0, newR1, xMin, newXLo);
+      // Live x-axis redraw — same styling base-chart applies on first render.
+      g.select('.x-axis').call(axisBottom(xScale).ticks(6).tickFormat(xFmt))
+        .call(a => a.select('.domain').attr('stroke', axisColor))
+        .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
+        .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
       updateLinearAnnot(newR1, newR2, newXLo, newXHi);
-      updateRightAnnot(newR2, r3, newXHi, xMax);
+      leftTintRect.attr('width', newR1 - r0);
+      rightTintRect.attr('x', newR2).attr('width', r3 - newR2);
+      drawTailRuler(leftRulerG,  leftScale,  newXLo, xMin, newXHi - newXLo);
+      drawTailRuler(rightRulerG, rightScale, newXHi, xMax, newXHi - newXLo);
       onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
-      currentXLo = newXLo; currentXHi = newXHi;
-      currentR1  = newR1;  currentR2  = newR2;
     }
 
     function applyLeftDrag(px) {
