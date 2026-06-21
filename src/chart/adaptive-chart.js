@@ -346,13 +346,15 @@ function renderPiecewise(points, {
       // Full-range log scale — avoids exponential blowup when the left tail is
       // tiny (small r1). scaleLog([logMin,xLo],[0,r1]).invert exponentiation by
       // px/r1 is huge when r1 << px.
-      const newXLo = scaleLog().domain([logMin, currentXHi]).range([r0, currentR2]).invert(px);
+      const raw = scaleLog().domain([logMin, currentXHi]).range([r0, currentR2]).invert(px);
+      const newXLo = Math.max(logMin + eps, raw);
       applyState(newXLo, currentXHi, px, currentR2);
       return newXLo;
     }
 
     function applyRightDrag(px) {
-      const newXHi = scaleLog().domain([currentXLo, xMax]).range([currentR1, r3]).invert(px);
+      const raw = scaleLog().domain([currentXLo, xMax]).range([currentR1, r3]).invert(px);
+      const newXHi = Math.min(xMax - eps, raw);
       applyState(currentXLo, newXHi, currentR1, px);
       return newXHi;
     }
@@ -432,8 +434,8 @@ function renderPiecewise(points, {
         const rawDelta = (newR1 - panStartR1) * panRate;
         let newXLo = panStartXLo + rawDelta;
         let newXHi = panStartXHi + rawDelta;
-        if (newXLo < xMin) { newXHi -= (newXLo - xMin); newXLo = xMin; }
-        if (newXHi > xMax) { newXLo -= (newXHi - xMax); newXHi = xMax; }
+        if (newXLo < logMin + eps) { newXHi -= (newXLo - (logMin + eps)); newXLo = logMin + eps; }
+        if (newXHi > xMax   - eps) { newXLo -= (newXHi - (xMax   - eps)); newXHi = xMax   - eps; }
         applyState(newXLo, newXHi, newR1, newR2);
       })
       .on('end', () => {
