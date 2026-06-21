@@ -97,7 +97,14 @@ function renderExperimental() {
       xHi: manualXHi ?? undefined,
       qLo: manualQLo ?? undefined,
       qHi: manualQHi ?? undefined,
-      onWindowDrag: ({ xLo, xHi }) => updateRangeDisplay(xLo, xHi, xFormat),
+      onWindowDrag: ({ xLo, xHi, qLo, qHi }) => {
+        updateRangeDisplay(xLo, xHi, xFormat);
+        if (qLo != null && qHi != null) {
+          const w = qHi - qLo;
+          alphaSlider.value = w;
+          alphaValue.textContent = w.toFixed(2);
+        }
+      },
       onWindowChange: ({ xLo, xHi, qLo, qHi }) => {
         manualXLo = xLo; manualXHi = xHi;
         if (qLo != null) manualQLo = qLo;

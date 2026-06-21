@@ -612,6 +612,7 @@ function renderPiecewise(points, {
       .on('drag', event => {
         const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, event.x));
         applyLeftDrag(px);
+        onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
       .on('end', () => {
         onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
@@ -622,6 +623,7 @@ function renderPiecewise(points, {
       .on('drag', event => {
         const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, event.x));
         applyRightDrag(px);
+        onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
       .on('end', () => {
         onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
