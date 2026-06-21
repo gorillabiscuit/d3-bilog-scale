@@ -312,7 +312,7 @@ function renderPiecewise(points, {
   // so a lightly-compressed tail (×0.5) is barely tinted while a heavily-compressed one
   // (×17, ×124) approaches LINE_OP, matching the visual weight of a single post line.
   // objectBoundingBox coords mean the gradient tracks the rect; only stop-opacity updates.
-  const LINE_OP       = 0.14; // post line stroke-opacity — the natural reference ceiling
+  const LINE_OP       = 0.28; // 2× line stroke-opacity — fills need more than lines to match perceptually
   const TINT_REF_CHUNKS = 10; // n_chunks at which gradient reaches LINE_OP
   const tailEndOp = (tailSpan, W) =>
     W > 0 ? LINE_OP * Math.min(1, Math.log1p(tailSpan / W) / Math.log1p(TINT_REF_CHUNKS)) : 0;
