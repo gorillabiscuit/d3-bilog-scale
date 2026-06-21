@@ -254,16 +254,25 @@ function renderPiecewise(points, {
         if (spacing < LINE_MIN_PX) { solidX = xLeft; break; }
 
         const id = `hp-${hatchInstId}-${prefix}${i}`;
-        svgDefs.append('pattern')
+        const pat = svgDefs.append('pattern')
           .attr('id', id)
           .attr('patternUnits', 'userSpaceOnUse')
+          .attr('overflow', 'visible')
           .attr('x', xLeft).attr('y', 0)
+          .attr('width', spacing).attr('height', spacing);
+        // Faint white base fills the inter-line space, giving each band a
+        // subtle stripe that reads as a distinct section even in sparse areas.
+        pat.append('rect')
           .attr('width', spacing).attr('height', spacing)
-          .append('line')
-            .attr('x1', -1).attr('y1', -1)
-            .attr('x2', spacing + 1).attr('y2', spacing + 1)
-            .attr('stroke', tickColor).attr('stroke-opacity', 0.35)
-            .attr('stroke-width', 1);
+          .attr('fill', tickColor).attr('fill-opacity', 0.20);
+        // Diagonal line extended ±1px past tile corners so that with
+        // overflow:visible adjacent tiles genuinely overlap, eliminating
+        // the anti-aliasing dots that appear at tile seam points.
+        pat.append('line')
+          .attr('x1', -1).attr('y1', -1)
+          .attr('x2', spacing + 1).attr('y2', spacing + 1)
+          .attr('stroke', tickColor).attr('stroke-opacity', 0.55)
+          .attr('stroke-width', 1);
         g.append('rect')
           .attr('x', xLeft).attr('width', bandW)
           .attr('y', 0).attr('height', innerH)
