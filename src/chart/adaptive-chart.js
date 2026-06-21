@@ -232,8 +232,29 @@ function renderPiecewise(points, {
       return bands;
     }
 
-    // Draw hatch bands. Each band's line spacing is proportional to its pixel
-    // width relative to the widest band, guaranteeing a visible density gradient.
+    // Left tail: log scale places smallest values (near leftMin) in the WIDEST pixel
+    // bands (log expands small values). Starting from leftMin outward finds wide bands
+    // first; starting from curXLo finds narrow bands first and breaks immediately.
+    // Collect wide-to-narrow, then reverse for boundary-nearest-first ordering.
+    function collectLeftBands(sub, leftMin, curXLo, step) {
+      const bands = [];
+      let prevPx = sub(leftMin);
+      for (let v = leftMin + step; v < curXLo; v += step) {
+        const px    = sub(v);
+        const bandW = px - prevPx;
+        if (bandW < BAND_MIN_PX) break;
+        bands.push({ xLeft: prevPx, bandW });
+        prevPx = px;
+      }
+      bands.reverse();  // boundary-nearest first, consistent with drawTailBands contract
+      return bands;
+    }
+
+    // Draw hatch bands. Each band's line spacing encodes compression:
+    //   Right tail: widest band = boundary-nearest = sparsest → bandW / maxBandW
+    //   Left tail:  narrowest band = boundary-nearest = sparsest → minBandW / bandW
+    // This gives mirror-symmetric density gradients: sparse at each boundary,
+    // dense at each extreme, regardless of log-scale direction.
     // `coverageEdge` tracks where drawn coverage ends so the solid-fill remnant
     // is placed correctly for both left (right→left) and right (left→right) tails.
     function drawTailBands(g, prefix, bands, tailX, tailW) {
@@ -249,13 +270,32 @@ function renderPiecewise(points, {
 
       const isLeft    = tailX < bands[0].xLeft; // left tail: extreme is to the left of all bands
       const maxBandW  = Math.max(...bands.map(b => b.bandW));
-      // For left tail, coverageEdge starts at boundary (curR1) and moves left.
-      // For right tail, coverageEdge starts at boundary (curR2) and moves right.
+      const minBandW  = Math.min(...bands.map(b => b.bandW));
+      // For left tail, coverageEdge starts at the right edge of the boundary-nearest
+      // collected band. For right tail, it starts at the left edge of the same.
       let coverageEdge = isLeft ? bands[0].xLeft + bands[0].bandW : bands[0].xLeft;
+
+      // Left tail: the most-compressed region sits between the last collected band
+      // and the boundary (curR1 = tailX + tailW). These bands are too narrow to
+      // hatch → solid fill the gap so it reads as "maximally compressed".
+      if (isLeft) {
+        const gapX = coverageEdge;
+        const gapW = (tailX + tailW) - gapX;
+        if (gapW > 0.5) {
+          g.append('rect')
+            .attr('x', gapX).attr('width', gapW)
+            .attr('y', 0).attr('height', innerH)
+            .attr('fill', tickColor).attr('fill-opacity', 0.50);
+        }
+      }
 
       for (let i = 0; i < bands.length; i++) {
         const { xLeft, bandW } = bands[i];
-        const spacing = BASE_SPACING * bandW / maxBandW;
+        // Left tail: boundary-nearest band is narrowest → assign it BASE_SPACING (sparsest).
+        // Right tail: boundary-nearest band is widest → assign it BASE_SPACING (sparsest).
+        const spacing = isLeft
+          ? BASE_SPACING * minBandW / bandW
+          : BASE_SPACING * bandW / maxBandW;
 
         if (spacing < LINE_MIN_PX) {
           // This band and all beyond are too compressed — solid fill the rest.
@@ -310,7 +350,14 @@ function renderPiecewise(points, {
       }
     }
 
-    const leftBands  = collectBands(leftSub,  curXLo, -1, leftMin);
+    // Left tail domain may be smaller than windowSpan (e.g. when the linear window
+    // is panned far right). Target ~6 visible bands regardless of tail width.
+    // Left tail: use windowSpan as step if it fits; otherwise divide the domain
+    // into ~6 equal slices. collectLeftBands iterates from extreme toward boundary
+    // (where bands are widest) and reverses the result for boundary-first ordering.
+    const leftTailDomain = curXLo - leftMin;
+    const leftStep = leftTailDomain > windowSpan ? windowSpan : leftTailDomain / 6;
+    const leftBands  = collectLeftBands(leftSub, leftMin, curXLo, leftStep);
     const rightBands = collectBands(rightSub, curXHi, +1, rightMax);
 
     drawTailBands(leftG,  'l', leftBands,  r0,    curR1 - r0);
