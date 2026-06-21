@@ -234,6 +234,8 @@ function renderPiecewise(points, {
 
     // Draw hatch bands. Each band's line spacing is proportional to its pixel
     // width relative to the widest band, guaranteeing a visible density gradient.
+    // `coverageEdge` tracks where drawn coverage ends so the solid-fill remnant
+    // is placed correctly for both left (right→left) and right (left→right) tails.
     function drawTailBands(g, prefix, bands, tailX, tailW) {
       if (bands.length === 0) {
         if (tailW > 1) {
@@ -245,53 +247,58 @@ function renderPiecewise(points, {
         return;
       }
 
-      const maxBandW = Math.max(...bands.map(b => b.bandW));
-      let solidX = null;
+      const isLeft    = tailX < bands[0].xLeft; // left tail: extreme is to the left of all bands
+      const maxBandW  = Math.max(...bands.map(b => b.bandW));
+      // For left tail, coverageEdge starts at boundary (curR1) and moves left.
+      // For right tail, coverageEdge starts at boundary (curR2) and moves right.
+      let coverageEdge = isLeft ? bands[0].xLeft + bands[0].bandW : bands[0].xLeft;
 
       for (let i = 0; i < bands.length; i++) {
         const { xLeft, bandW } = bands[i];
         const spacing = BASE_SPACING * bandW / maxBandW;
-        if (spacing < LINE_MIN_PX) { solidX = xLeft; break; }
+
+        if (spacing < LINE_MIN_PX) {
+          // This band and all beyond are too compressed — solid fill the rest.
+          // For left tail: fill from extreme (tailX=r0) to this band's right edge.
+          // For right tail: fill from this band's left edge to extreme (tailX+tailW=r3).
+          const fillX = isLeft ? tailX : xLeft;
+          const fillW = isLeft ? (coverageEdge - tailX) : (tailX + tailW - xLeft);
+          if (fillW > 0.5) {
+            g.append('rect')
+              .attr('x', fillX).attr('width', fillW)
+              .attr('y', 0).attr('height', innerH)
+              .attr('fill', tickColor).attr('fill-opacity', 0.50);
+          }
+          return;
+        }
 
         const id = `hp-${hatchInstId}-${prefix}${i}`;
-        const pat = svgDefs.append('pattern')
+        svgDefs.append('pattern')
           .attr('id', id)
           .attr('patternUnits', 'userSpaceOnUse')
           .attr('overflow', 'visible')
           .attr('x', xLeft).attr('y', 0)
-          .attr('width', spacing).attr('height', spacing);
-        // Faint white base fills the inter-line space, giving each band a
-        // subtle stripe that reads as a distinct section even in sparse areas.
-        pat.append('rect')
           .attr('width', spacing).attr('height', spacing)
-          .attr('fill', tickColor).attr('fill-opacity', 0.20);
-        // Diagonal line extended ±1px past tile corners so that with
-        // overflow:visible adjacent tiles genuinely overlap, eliminating
-        // the anti-aliasing dots that appear at tile seam points.
-        pat.append('line')
-          .attr('x1', -1).attr('y1', -1)
-          .attr('x2', spacing + 1).attr('y2', spacing + 1)
-          .attr('stroke', tickColor).attr('stroke-opacity', 0.55)
-          .attr('stroke-width', 1);
+          .append('line')
+            .attr('x1', -1).attr('y1', -1)
+            .attr('x2', spacing + 1).attr('y2', spacing + 1)
+            .attr('stroke', tickColor).attr('stroke-opacity', 0.45)
+            .attr('stroke-width', 1);
         g.append('rect')
           .attr('x', xLeft).attr('width', bandW)
           .attr('y', 0).attr('height', innerH)
           .attr('fill', `url(#${id})`);
+
+        // Advance coverage edge toward the extreme.
+        coverageEdge = isLeft ? xLeft : xLeft + bandW;
       }
 
-      // Solid fill covers any sub-pixel bands and the unstepped remnant at the extreme.
-      // For the left tail tailX=r0 (extreme), for the right tail tailX=curR2 (boundary).
-      const lastDrawnRight = solidX !== null
-        ? solidX
-        : bands[bands.length - 1].xLeft + bands[bands.length - 1].bandW;
-      const extremeLeft  = tailX < bands[0].xLeft; // true = left tail
-      const fillX = extremeLeft ? tailX : lastDrawnRight;
-      const fillW = extremeLeft
-        ? bands[0].xLeft - tailX          // extreme gap on the left
-        : (tailX + tailW) - lastDrawnRight; // extreme gap on the right
-      if (fillW > 0.5) {
+      // Solid fill for the unstepped remnant between the last band and the extreme.
+      const remX = isLeft ? tailX : coverageEdge;
+      const remW = isLeft ? (coverageEdge - tailX) : (tailX + tailW - coverageEdge);
+      if (remW > 0.5) {
         g.append('rect')
-          .attr('x', fillX).attr('width', fillW)
+          .attr('x', remX).attr('width', remW)
           .attr('y', 0).attr('height', innerH)
           .attr('fill', tickColor).attr('fill-opacity', 0.50);
       }
