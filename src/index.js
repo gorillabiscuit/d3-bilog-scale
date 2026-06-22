@@ -1,6 +1,5 @@
 import { createAdaptiveChart } from './chart/adaptive-chart.js';
 import { makeFmt }             from './utils/format.js';
-import { windowQuantile }      from './scale/window.js';
 import { LOADERS }             from './data/loaders.js';
 
 // ── UI refs ──────────────────────────────────────────────────────────────────
@@ -88,16 +87,8 @@ function renderExperimental() {
       showLocalRate: true,
     })
   );
-
-  // Initialise range display from current state
-  const rangeEl = document.getElementById('window-range');
-  if (rangeEl) {
-    const values = points.map(d => d.x);
-    const { xLo, xHi } = manualXLo != null && manualXHi != null
-      ? { xLo: manualXLo, xHi: manualXHi }
-      : windowQuantile(values, slider);
-    updateRangeDisplay(xLo, xHi, xFormat);
-  }
+  // The chart reports its actual (capped) window via onWindowDrag during render, which drives
+  // the range readout — so it always matches what's drawn rather than the raw slider quantiles.
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
@@ -127,6 +118,18 @@ themeToggle.addEventListener('click', () => {
   // SVG reskins instantly without a rebuild.
   document.documentElement.setAttribute('data-theme', currentTheme);
   themeToggle.textContent = currentTheme === 'dark' ? '☀ Light' : '☾ Dark';
+});
+
+// Double-click anywhere on the chart resets to the default data-driven window — the
+// canonical d3 reset gesture (cf. d3-zoom / d3-brush). Reference-anchored handle drags make
+// the window un-trappable, but this is the quick way back to the centred quantile view.
+// Attached to the stable container (its SVG child is replaced on every render).
+document.getElementById('chart-adaptive').addEventListener('dblclick', () => {
+  alphaSlider.value = 0.5;
+  alphaValue.textContent = '0.50';
+  manualXLo = null; manualXHi = null;
+  manualQLo = null; manualQHi = null;
+  renderExperimental();
 });
 
 let _resizeTimer;

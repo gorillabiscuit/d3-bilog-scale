@@ -109,51 +109,42 @@ function renderPiecewise(points, {
       .style('outline', 'none')
     .lower();
 
-  // Pan hints — anchored to the chart edges (not the window handles), because
-  // edge-scroll activates when the window is dragged to the chart boundary.
+  // Pan hint — a single badge that rides along centred in the linear window. It announces the
+  // gesture on render, then fades after a few seconds. The ←/→ convey that the window slides
+  // through the data; "scan the data" implies the whole range is reachable (push to an edge and
+  // the window docks and keeps scrolling). It follows the window via positionPanHint() in
+  // applyState, so it never gets left behind when you drag.
+  const HINT_TEXT = '← drag to scan the data →';
   const hintFontSize = 10, hintPadY = 4, hintPadX = 9;
   const hintH = hintFontSize + hintPadY * 2;
-  const hw = t => t.length * 5.5 + hintPadX * 2;
+  const hintW = HINT_TEXT.length * 5.5 + hintPadX * 2;
+  const hintCy = innerH - hintH / 2 - 4;
 
-  const HINT_L = '← drag to pan', HINT_R = 'drag to pan →';
-  const wL = hw(HINT_L), wR = hw(HINT_R);
-  const inset = 8;
+  const panHintG = g.append('g').attr('pointer-events', 'none').style('opacity', 0.9);
+  panHintG.append('rect')
+    .attr('class', 'pan-hint-bg')
+    .attr('x', -hintW / 2).attr('y', -hintH / 2)
+    .attr('width', hintW).attr('height', hintH).attr('rx', hintH / 2)
+    .attr('fill-opacity', 0.12)
+    .attr('stroke-opacity', 0.3).attr('stroke-width', 1);
+  panHintG.append('text')
+    .attr('class', 'pan-hint-text')
+    .attr('y', hintFontSize * 0.35)
+    .attr('text-anchor', 'middle')
+    .attr('fill-opacity', 0.65)
+    .attr('font-size', `${hintFontSize}px`)
+    .text(HINT_TEXT);
 
-  const wC = hw('drag to pan');
-  const centerX = (r1 + r2) / 2;
-  const leftEdgeR  = wL / 2 + inset + wL / 2;        // right edge of left badge
-  const rightEdgeL = innerW - wR / 2 - inset - wR / 2; // left edge of right badge
-  const showCenter = centerX - wC / 2 > leftEdgeR + 6 && centerX + wC / 2 < rightEdgeL - 6;
+  // Re-centre the badge in the current window; safe to call after it has faded/removed (no-op).
+  const positionPanHint = () =>
+    panHintG.attr('transform', `translate(${(currentR1 + currentR2) / 2},${hintCy})`);
+  positionPanHint();
 
-  const hints = [
-    { text: HINT_L,        x: wL / 2 + inset },
-    ...(showCenter ? [{ text: 'drag to pan', x: centerX }] : []),
-    { text: HINT_R,        x: innerW - wR / 2 - inset },
-  ];
-  const cy = innerH - hintH / 2 - 4;
-
-  hints.forEach(s => {
-    const w = hw(s.text);
-    const hg = g.append('g').attr('pointer-events', 'none').style('opacity', 0.9);
-    hg.append('rect')
-      .attr('class', 'pan-hint-bg')
-      .attr('x', s.x - w / 2).attr('y', cy - hintH / 2)
-      .attr('width', w).attr('height', hintH).attr('rx', hintH / 2)
-      .attr('fill-opacity', 0.12)
-      .attr('stroke-opacity', 0.3).attr('stroke-width', 1);
-    hg.append('text')
-      .attr('class', 'pan-hint-text')
-      .attr('x', s.x).attr('y', cy + hintFontSize * 0.35)
-      .attr('text-anchor', 'middle')
-      .attr('fill-opacity', 0.65)
-      .attr('font-size', `${hintFontSize}px`)
-      .text(s.text);
-    hg.style('transition', 'opacity 0.8s');
-    setTimeout(() => {
-      hg.style('opacity', 0);
-      setTimeout(() => hg.remove(), 800);
-    }, 3000);
-  });
+  panHintG.style('transition', 'opacity 0.8s');
+  setTimeout(() => {
+    panHintG.style('opacity', 0);
+    setTimeout(() => panHintG.remove(), 800);
+  }, 3000);
 
   // Lift dots above the axes/gridlines drawn by createChart.
   g.selectAll('circle').raise();
@@ -252,7 +243,10 @@ function renderPiecewise(points, {
       if (w >= ARROW_MIN_PX) {
         arrows.push({ id: `arrow-${k}`, x1: a, x2: b, opacity: 0.45 });
         if (w >= TEXT_MIN_PX) {
-          const val = `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`;
+          // A tail narrower than one window-width can't be "×N window-widths" — show its
+          // dollar span instead of a misleading ×0.x.
+          const mult = beyond ? Math.abs(extreme - d0) / W : 1;
+          const val = mult >= 1 ? `×${fmtMult(mult)}` : annotFmt(Math.abs(extreme - d0));
           texts.push({ id: `lbl-t-${k}`, x: (a + b) / 2, y: 8, text: 'log', opacity: 0.3, italic: true, size: 9 });
           texts.push({ id: `lbl-v-${k}`, x: (a + b) / 2, y: ANNOT_Y - 2, text: val, opacity: 0.65, size: 10, weight: '500' });
         }
@@ -281,7 +275,7 @@ function renderPiecewise(points, {
         }
         arrows.push({ id: 'collapse-arrow', x1: a, x2: b, opacity: 0.65 });
         texts.push({ id: 'collapse-lbl-t', x: (a + b) / 2, y: 8, text: 'log', opacity: 0.3, italic: true, size: 9 });
-        texts.push({ id: 'collapse-lbl-v', x: (a + b) / 2, y: ANNOT_Y - 2, text: `×${fmtMult(n)}`, opacity: 0.65, size: 10, weight: '500' });
+        texts.push({ id: 'collapse-lbl-v', x: (a + b) / 2, y: ANNOT_Y - 2, text: n >= 1 ? `×${fmtMult(n)}` : annotFmt(Math.abs(extreme - collapseAt)), opacity: 0.65, size: 10, weight: '500' });
       }
     }
 
@@ -355,6 +349,10 @@ function renderPiecewise(points, {
   drawTailRuler(leftRulerG,  leftScale,  xLo, xMin, xHi - xLo);
   drawTailRuler(rightRulerG, rightScale, xHi, xMax, xHi - xLo);
 
+  // Report the window the scale actually settled on (after capping) so the page readout
+  // reflects what's rendered, not the raw slider quantiles.
+  onWindowDrag?.({ xLo, xHi });
+
   // ── Drag handles ─────────────────────────────────────────────────────────────
   if (onWindowChange) {
     const circles = g.selectAll('circle');
@@ -365,20 +363,26 @@ function renderPiecewise(points, {
       leftScale = sub.leftScale;
       midScale = sub.midScale;
       rightScale = sub.rightScale;
-      currentXLo = newXLo; currentXHi = newXHi;
-      currentR1  = newR1;  currentR2  = newR2;
+      // Read the window BACK from the scale: it may have capped the domain (never swallow the
+      // outliers) or reserved tail pixels. The chart renders whatever the scale decided.
+      [currentXLo, currentXHi] = xScale.linearDomain();
+      [currentR1,  currentR2 ] = xScale.linearRange();
       circles.attr('cx', d => xScale(d.x));
-      overlay.attr('x', newR1).attr('width', Math.max(0, newR2 - newR1));
-      leftHandle?.attr('transform',  `translate(${newR1},0)`);
-      rightHandle?.attr('transform', `translate(${newR2},0)`);
+      overlay.attr('x', currentR1).attr('width', Math.max(0, currentR2 - currentR1));
+      leftHandle?.attr('transform',  `translate(${currentR1},0)`);
+      rightHandle?.attr('transform', `translate(${currentR2},0)`);
+      positionPanHint();  // the hint badge rides along, centred in the window
       // Live x-axis redraw — colour is inherited from CHART_CSS, so just rebind the axis.
       g.select('.x-axis').call(axisBottom(xScale).ticks(6).tickFormat(xFmt));
-      updateLinearAnnot(newR1, newR2, newXLo, newXHi);
-      drawTailRuler(leftRulerG,  leftScale,  newXLo, xMin, newXHi - newXLo);
-      drawTailRuler(rightRulerG, rightScale, newXHi, xMax, newXHi - newXLo);
-      onWindowDrag?.({ xLo: newXLo, xHi: newXHi });
+      updateLinearAnnot(currentR1, currentR2, currentXLo, currentXHi);
+      drawTailRuler(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
+      drawTailRuler(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
+      onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi });
     }
 
+    // The boundary in dollars is read straight off the scale's own invert at the handle's
+    // pixel — pure math layer, smooth and monotonic. The window can't run away to a flattened
+    // view because scaleAdaptive caps it to the non-outlier range; the chart just renders that.
     function applyLeftDrag(px) {
       const newXLo = Math.max(xMin + eps, xScale.invert(px));
       applyState(newXLo, currentXHi, px, currentR2);
@@ -446,6 +450,8 @@ function renderPiecewise(points, {
 
     // Declare handles before pan drag so the pan closure can reference them.
     let leftHandle, rightHandle;
+    // Set on the first move of any drag; a drag that never moves is a click (see end handlers).
+    let dragMoved = false;
 
     // Pan: the box translates rigidly in pixel space; the domain follows at a uniform
     // dollar-per-pixel rate. When the pointer pushes past a chart edge the box docks and
@@ -454,6 +460,9 @@ function renderPiecewise(points, {
     // accumulated scroll is folded into the domain so dragging back is seamless.
     const AUTO_GAIN = 0.12;          // overshoot px → fraction of a pan-step per ~frame
     const AUTO_MAX_OVERSHOOT = 120;  // cap so it can't scroll absurdly fast
+    // The window must stay within the scale's cap, not the raw data extremes — otherwise
+    // panning past the cap pushes both edges onto the bound and collapses the window.
+    const [panLo, panHi] = xScale.windowBounds();
     let panStartX = 0, panStartR1 = r1, panStartXLo = xLo, panStartXHi = xHi;
     let panBoxW = r2 - r1, panRate = (xHi - xLo) / panBoxW;
     let panPointerX = 0, panAutoAccum = 0, panPrevElapsed = 0, panTimer = null;
@@ -471,13 +480,14 @@ function renderPiecewise(points, {
       const boundedDelta = newR1 - panStartR1;                                  // pointer pan, capped at the dock
       let newXLo = panStartXLo + boundedDelta * panRate + panAutoAccum;
       let newXHi = panStartXHi + boundedDelta * panRate + panAutoAccum;
-      if (newXLo < xMin + eps) { newXHi -= (newXLo - (xMin + eps)); newXLo = xMin + eps; }
-      if (newXHi > xMax - eps) { newXLo -= (newXHi - (xMax - eps)); newXHi = xMax - eps; }
+      if (newXLo < panLo) { newXHi -= (newXLo - panLo); newXLo = panLo; }
+      if (newXHi > panHi) { newXLo -= (newXHi - panHi); newXHi = panHi; }
       applyState(newXLo, newXHi, newR1, newR2);
     }
 
     overlay.call(drag()
       .on('start', event => {
+        dragMoved = false;
         panStartX = event.x; panPointerX = event.x;
         panStartR1 = currentR1; panStartXLo = currentXLo; panStartXHi = currentXHi;
         panBoxW = currentR2 - currentR1; panRate = (currentXHi - currentXLo) / panBoxW;
@@ -487,16 +497,18 @@ function renderPiecewise(points, {
           const dt = Math.min(elapsed - panPrevElapsed, 50); panPrevElapsed = elapsed;
           const over = panOvershoot();
           // Only keep scrolling while there's data left to reveal in that direction.
-          const canScroll = over > 0 ? currentXHi < xMax - eps * 2
-                          : over < 0 ? currentXLo > xMin + eps * 2 : false;
-          if (canScroll) { panAutoAccum += over * panRate * AUTO_GAIN * (dt / 16); panApply(); }
+          const canScroll = over > 0 ? currentXHi < panHi - eps * 2
+                          : over < 0 ? currentXLo > panLo + eps * 2 : false;
+          if (canScroll) { dragMoved = true; panAutoAccum += over * panRate * AUTO_GAIN * (dt / 16); panApply(); }
         });
       })
-      .on('drag', event => { panPointerX = event.x; panApply(); })
+      .on('drag', event => { dragMoved = true; panPointerX = event.x; panApply(); })
       .on('end', () => {
         if (panTimer) { panTimer.stop(); panTimer = null; }
         overlay.style('cursor', null);
-        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+        // A pure click (no movement) must not re-render: it would replace the SVG between
+        // the two clicks of a double-click and swallow the reset gesture.
+        if (dragMoved) onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
 
@@ -534,31 +546,39 @@ function renderPiecewise(points, {
       const panRate = (currentXHi - currentXLo) / boxW;
       const newR1 = Math.max(r0, Math.min(r3 - boxW, currentR1 + dir * step));
       const newR2 = newR1 + boxW;
-      const newXLo = Math.max(xMin, currentXLo + dir * step * panRate);
-      const newXHi = Math.min(xMax, currentXHi + dir * step * panRate);
+      // Same cap handling as the mouse pan: clamp to the window bounds and shift as a unit so
+      // arrow-key panning parks at the cap with its width intact, instead of drifting past it.
+      let newXLo = currentXLo + dir * step * panRate;
+      let newXHi = currentXHi + dir * step * panRate;
+      if (newXLo < panLo) { newXHi -= (newXLo - panLo); newXLo = panLo; }
+      if (newXHi > panHi) { newXLo -= (newXHi - panHi); newXHi = panHi; }
       applyState(newXLo, newXHi, newR1, newR2);
       onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
     });
 
     leftHandle.call(drag()
       .on('drag', event => {
+        dragMoved = true;
         const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, event.x));
         applyLeftDrag(px);
         onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
+      .on('start', () => { dragMoved = false; })
       .on('end', () => {
-        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+        if (dragMoved) onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
 
     rightHandle.call(drag()
       .on('drag', event => {
+        dragMoved = true;
         const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, event.x));
         applyRightDrag(px);
         onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
+      .on('start', () => { dragMoved = false; })
       .on('end', () => {
-        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+        if (dragMoved) onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
   }

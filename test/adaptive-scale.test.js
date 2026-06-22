@@ -122,6 +122,48 @@ describe('graceful degradation', () => {
   });
 });
 
+describe('window cap and pixel reserve', () => {
+  test('tail pixel-reserve never inverts the linear region (wide chart)', () => {
+    // On a 1200px chart minTail = 24px > the 20px the window is given. Reserving each tail
+    // independently used to push p1 past p2, producing a negative-width linear region and
+    // breaking monotonicity. (The 800px suite default never triggers it: minTail = 16 < 20.)
+    const s = scaleAdaptive().data(bothTails).range([0, 1200]);
+    s.linearDomain([45, 70]).linearRange([1180, 1200]); // 20px window, both tails, docked right
+    const [r1, r2] = s.linearRange();
+    expect(r2).toBeGreaterThan(r1);
+    expect(s(50)).toBeLessThan(s(65)); // monotonic across the linear window
+  });
+
+  test('window cannot swallow the whole range on multi-decade data', () => {
+    const s = scaleAdaptive().data(bothTails).range([0, 800]).breakpointMethod('quantile').window(1);
+    const [xMin, xMax] = s.domain();
+    const [lo, hi] = s.linearDomain();
+    expect(lo).toBeGreaterThan(xMin);
+    expect(hi).toBeLessThan(xMax);
+    expect(s.regions().some((r) => r.type === 'log')).toBe(true);
+  });
+
+  test('window panned entirely past the ceiling keeps its width (no collapse)', () => {
+    const s = scaleAdaptive().data(bothTails).range([0, 800]);
+    const [, ceil] = s.windowBounds();
+    s.linearDomain([ceil * 1.5, ceil * 1.5 + 500]); // both edges above the ceiling
+    const [lo, hi] = s.linearDomain();
+    expect(hi - lo).toBeCloseTo(500, 0);          // width preserved, not collapsed to 0
+    expect(hi).toBeLessThanOrEqual(ceil + 1e-6);
+  });
+
+  test('windowBounds() caps multi-decade data and is a no-op for compact data', () => {
+    const wide = scaleAdaptive().data(bothTails).range([0, 800]);
+    const [wLo, wHi] = wide.windowBounds();
+    const [xMin, xMax] = wide.domain();
+    expect(wLo).toBeGreaterThan(xMin);
+    expect(wHi).toBeLessThan(xMax);
+
+    const compact = scaleAdaptive().data(cluster).range([0, 800]); // < 1.5 decades
+    expect(compact.windowBounds()).toEqual(compact.domain());
+  });
+});
+
 describe('d3 compatibility', () => {
   test('domain() getter returns current domain', () => {
     const s = makeScale();

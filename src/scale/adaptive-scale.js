@@ -52,6 +52,19 @@ export function scaleAdaptive() {
   let hasLeft = false, hasRight = false;
   let tickPool = [];
 
+  // The outer bound on the linear window. On multi-decade data it sits 5% of the log span in
+  // from each extreme, so the window always leaves a log-tail on each side and can never
+  // flatten the cluster. Compact data returns the full domain, so the scale still degrades to
+  // linear. Exposed via scale.windowBounds() so interaction code (panning) can respect it.
+  function windowCap() {
+    const [xMin, xMax] = _domain;
+    if (xMin > 0 && Math.log10(xMax / xMin) > 1.5) {
+      const tf = Math.pow(xMax / xMin, 0.05);
+      return [xMin * tf, xMax / tf];
+    }
+    return [xMin, xMax];
+  }
+
   function rebuild() {
     const [xMin, xMax] = _domain;
     const [rMin, rMax] = _range;
@@ -91,8 +104,20 @@ export function scaleAdaptive() {
       hi = xMin + (xMax - xMin) * 0.75;
     }
 
-    hasLeft = lo > xMin;
-    hasRight = hi < xMax;
+    // Cap the window into [floor, ceil] by shifting it as a UNIT (preserving width). Clamping
+    // the two edges independently would collapse a window panned entirely past a bound to zero
+    // width — the cause of the "$73.4M – $73.4M, linear $0" bug.
+    const [floor, ceil] = windowCap();
+    const width = Math.max(0, hi - lo);
+    if (hi > ceil)  { hi = ceil;  lo = ceil - width; }
+    if (lo < floor) { lo = floor; hi = Math.min(ceil, floor + width); }
+
+    // A tail spanning a negligible fraction of the data range is treated as absent. Without
+    // this, dragging the linear window's edge to a data extreme leaves a degenerate tail
+    // (e.g. $10–$10.2) that the pixel allocation still inflates to a "log ×0.0" strip.
+    const tailTol = (xMax - xMin) * 1e-8;
+    hasLeft = lo > xMin + tailTol;
+    hasRight = hi < xMax - tailTol;
 
     // Clamp to prevent out-of-bounds or zero-width linear region
     const eps = (xMax - xMin) * 1e-9;
@@ -111,8 +136,10 @@ export function scaleAdaptive() {
     // Determine range boundaries (r1, r2)
     let p1, p2;
     if (_r1Override != null && _r2Override != null) {
-      p1 = _r1Override;
-      p2 = _r2Override;
+      // An absent tail gets no pixels even under an explicit override, so the linear region
+      // extends to the chart edge instead of leaving a degenerate strip behind.
+      p1 = hasLeft ? _r1Override : rMin;
+      p2 = hasRight ? _r2Override : rMax;
     } else {
       const qLo = hasLeft ? Math.max(0, 0.5 - _window / 2) : 0;
       const qHi = hasRight ? Math.min(1, 0.5 + _window / 2) : 1;
@@ -121,6 +148,18 @@ export function scaleAdaptive() {
       p1 = rMin + wL;
       p2 = rMax - wR;
     }
+
+    // Reserve a minimum pixel sliver for any tail that exists, so a present tail is never
+    // squeezed to a zero-width "log ×0.0" strip. Fit the linear region INTO the post-reserve
+    // band [loBound, hiBound], preserving its pixel width where it fits and shifting it inward
+    // to make room — reserving each edge independently would let the two reserves cross and
+    // invert the region (p1 > p2), breaking scale monotonicity on charts wider than ~1000px.
+    const minTail = totalPixels * 0.02;
+    const loBound = hasLeft  ? rMin + minTail : rMin;
+    const hiBound = hasRight ? rMax - minTail : rMax;
+    const linW = Math.min(p2 - p1, hiBound - loBound);
+    p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
+    p2 = p1 + linW;
 
     currentR1 = p1;
     currentR2 = p2;
@@ -287,6 +326,10 @@ export function scaleAdaptive() {
   scale.subscales = function() {
     return { leftScale, midScale, rightScale };
   };
+
+  // [floor, ceil] the linear window is allowed to occupy — interaction code clamps to this so
+  // panning/dragging can't push the window past the cap (where it would otherwise collapse).
+  scale.windowBounds = windowCap;
 
   scale.type = 'adaptive';
 
