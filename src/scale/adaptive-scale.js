@@ -148,6 +148,9 @@ export function scaleAdaptive() {
   }
 
   scale.invert = function (p) {
+    // The pixel input is always clamped to range (independent of _clamp, which governs
+    // domain-value clamping in scale()). Interaction code feeds raw pointer pixels here;
+    // clamping keeps tooltips and drag from extrapolating past the chart edges.
     const [rMin, rMax] = _range;
     const clampP = Math.max(rMin, Math.min(rMax, p));
     if (hasLeft && clampP <= currentR1) return leftScale.invert(clampP);
@@ -222,11 +225,6 @@ export function scaleAdaptive() {
     if (!arguments.length) return _method;
     _method = m;
     rebuild();
-    return scale;
-  };
-
-  scale.allocAlpha = function (a) {
-    if (!arguments.length) return 0.5;
     return scale;
   };
 

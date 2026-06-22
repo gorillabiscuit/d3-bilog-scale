@@ -105,7 +105,7 @@ Plus these for interaction:
 
 Custom methods:
 - `scale.data(values)` — pass raw data for breakpoint detection
-- `scale.breakpointMethod(method)` — 'iqr', 'percentile', 'density', 'jenks'
+- `scale.breakpointMethod(method)` — 'iqr', 'quantile', 'percentile', 'log-iqr'
 - `scale.regions()` — returns array of {type, domain} objects describing the current regions
 
 ## Critical invariants
