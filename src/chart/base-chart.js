@@ -2,7 +2,10 @@ import { create, pointer, select } from 'd3-selection';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { extent } from 'd3-array';
-import { format } from 'd3-format';
+import { makeFmt } from '../utils/format.js';
+export { makeFmt };
+
+
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 
@@ -10,21 +13,6 @@ export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 // Observable renders many cells simultaneously — a shared id silently breaks clipping.
 let _clipId = 0;
 
-// d3.format uses SI prefixes: k, M, G (billion), T. Financial convention uses B for
-// billion, so currency values get their own formatter rather than "$~s" from d3-format.
-function currencyFmt(v) {
-  const abs = Math.abs(v);
-  if (abs >= 1e12) return `$${+(v / 1e12).toPrecision(3)}T`;
-  if (abs >= 1e9)  return `$${+(v / 1e9).toPrecision(3)}B`;
-  if (abs >= 1e6)  return `$${+(v / 1e6).toPrecision(3)}M`;
-  if (abs >= 1e3)  return `$${+(v / 1e3).toPrecision(3)}k`;
-  return `$${+v.toPrecision(3)}`;
-}
-
-// Exported so adaptive-chart.js and index.js can share the same formatter.
-export function makeFmt(specifier) {
-  return specifier === 'currency' ? currencyFmt : format(specifier);
-}
 
 /**
  * Create a scatterplot SVG node.

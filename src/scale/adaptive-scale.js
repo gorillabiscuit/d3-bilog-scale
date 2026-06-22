@@ -1,114 +1,158 @@
-import { scaleLog, scaleLinear } from 'd3-scale';
+import { scaleLinear, scaleSymlog, scaleLog } from 'd3-scale';
 import { min, max } from 'd3-array';
+import { windowQuantile } from './window.js';
 import { detectBreakpoints } from './breakpoints.js';
-import { generateTicks } from './ticks.js';
 
-const EPSILON = 1e-10; // guard against log(0)
+export function solveSymlogConstant(A, S, T) {
+  if (!(S > 0) || !(A > 0) || !(T > 0)) return 1;
+  if (T <= A / S) return S; // window shallower than the tail average → near-linear tail
+  const slopeAt = C => A / (C * Math.log1p(S / C));
+  let lo = S * 1e-9, hi = S * 1e9; // slopeAt(lo) ≫ T, slopeAt(hi) ≈ A/S < T
+  for (let i = 0; i < 80; i++) {
+    const mid = Math.sqrt(lo * hi); // C spans many orders of magnitude
+    if (slopeAt(mid) > T) lo = mid; else hi = mid;
+  }
+  return Math.sqrt(lo * hi);
+}
+
+export function symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope) {
+  const span    = Math.abs(extreme - boundary) || 1;
+  const outward = Math.sign(extreme - boundary) || 1; // +1 right tail, −1 left tail
+  const base    = scaleSymlog().domain([0, span]).range([pBoundary, pExtreme]);
+  base.constant(solveSymlogConstant(Math.abs(pExtreme - pBoundary), span, windowSlope));
+
+  const scale      = x => base(outward * (x - boundary)); // feed distance from the boundary
+  scale.invert     = px => boundary + outward * base.invert(px);
+  scale.ticks      = n => base.ticks(n).map(d => boundary + outward * d);
+  scale.tickFormat = (n, s) => base.tickFormat(n, s);
+  scale.domain     = () => outward > 0 ? [boundary, extreme] : [extreme, boundary];
+  scale.range      = () => outward > 0 ? [pBoundary, pExtreme] : [pExtreme, pBoundary];
+  scale.copy       = () => symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope);
+  return scale;
+}
 
 export function scaleAdaptive() {
   let _domain = [1, 100];
   let _range = [0, 1];
   let _data = [];
-  let _method = 'iqr';
-  let _alpha = 0.15; // blend factor: 1 = equal thirds, 0 = pure density-weighted
+  let _window = 0.5; // slider fraction [0, 1]
   let _clamp = false;
+  let _method = 'iqr'; // breakpoint detection method ('iqr' or 'quantile')
 
-  // Derived — rebuilt whenever domain/range/data changes
-  let _regions = []; // [{type, domain, range, pixels, scale}]
+  // Manual overrides for domain & range boundaries (null = auto-detect)
+  let _xLoOverride = null;
+  let _xHiOverride = null;
+  let _r1Override = null;
+  let _r2Override = null;
+
+  // Internal scales
+  let leftScale, midScale, rightScale;
+  let currentXLo, currentXHi;
+  let currentR1, currentR2;
+  let hasLeft = false, hasRight = false;
+  let tickPool = [];
 
   function rebuild() {
-    const [dMin, dMax] = _domain;
+    const [xMin, xMax] = _domain;
     const [rMin, rMax] = _range;
     const totalPixels = rMax - rMin;
 
-    // Need data to compute breakpoints; fall back to pure linear
-    if (_data.length < 2 || dMin >= dMax) {
+    if (xMin >= xMax || totalPixels <= 0) {
       const s = scaleLinear().domain(_domain).range(_range);
-      _regions = [{ type: 'linear', domain: _domain, range: _range, pixels: totalPixels, scale: s }];
+      leftScale = midScale = rightScale = s;
+      currentXLo = xMin; currentXHi = xMax;
+      currentR1 = rMin; currentR2 = rMax;
+      hasLeft = hasRight = false;
+      tickPool = s.ticks(10);
       return;
     }
 
-    const { left: bL, right: bR } = detectBreakpoints(_data, _method);
-
-    const hasLeft = bL > dMin;
-    const hasRight = bR < dMax;
-
-    // Count data points in each region
-    const nL = hasLeft ? _data.filter((v) => v < bL).length : 0;
-    const nM = _data.filter((v) => v >= bL && v <= bR).length;
-    const nR = hasRight ? _data.filter((v) => v > bR).length : 0;
-    const n = _data.length;
-
-    // Balanced allocation: 50% equal thirds, 50% density-weighted
-    let pL = hasLeft ? _alpha * (1 / 3) + (1 - _alpha) * (nL / n) : 0;
-    let pM = _alpha * (1 / 3) + (1 - _alpha) * (nM / n);
-    let pR = hasRight ? _alpha * (1 / 3) + (1 - _alpha) * (nR / n) : 0;
-
-    // Normalise to sum = 1
-    const total = pL + pM + pR;
-    pL /= total;
-    pM /= total;
-    pR /= total;
-
-    const wL = totalPixels * pL;
-    const wM = totalPixels * pM;
-    const wR = totalPixels * pR;
-
-    _regions = [];
-
-    if (hasLeft) {
-      const safeDMin = dMin <= 0 ? EPSILON : dMin;
-      const safeBL = bL <= 0 ? EPSILON : bL;
-      _regions.push({
-        type: 'log',
-        domain: [dMin, bL],
-        range: [rMin, rMin + wL],
-        pixels: wL,
-        scale: scaleLog().domain([safeDMin, safeBL]).range([rMin, rMin + wL]),
-      });
+    // Determine domain boundaries (xLo, xHi)
+    let lo, hi;
+    if (_xLoOverride != null && _xHiOverride != null) {
+      lo = _xLoOverride;
+      hi = _xHiOverride;
+    } else if (_data.length >= 2) {
+      if (_method === 'iqr') {
+        const { left, right } = detectBreakpoints(_data, 'iqr');
+        lo = left;
+        hi = right;
+      } else if (_method === 'quantile') {
+        const { xLo, xHi } = windowQuantile(_data, _window);
+        lo = xLo;
+        hi = xHi;
+      } else {
+        const { left, right } = detectBreakpoints(_data, _method);
+        lo = left;
+        hi = right;
+      }
+    } else {
+      lo = xMin + (xMax - xMin) * 0.25;
+      hi = xMin + (xMax - xMin) * 0.75;
     }
 
-    const middleRangeStart = rMin + wL;
-    _regions.push({
-      type: 'linear',
-      domain: [bL, bR],
-      range: [middleRangeStart, middleRangeStart + wM],
-      pixels: wM,
-      scale: scaleLinear().domain([bL, bR]).range([middleRangeStart, middleRangeStart + wM]),
-    });
+    hasLeft = lo > xMin;
+    hasRight = hi < xMax;
 
-    if (hasRight) {
-      const safeBR = bR <= 0 ? EPSILON : bR;
-      const safeDMax = dMax <= 0 ? EPSILON : dMax;
-      _regions.push({
-        type: 'log',
-        domain: [bR, dMax],
-        range: [middleRangeStart + wM, rMax],
-        pixels: wR,
-        scale: scaleLog().domain([safeBR, safeDMax]).range([middleRangeStart + wM, rMax]),
-      });
-    }
-  }
+    // Clamp to prevent out-of-bounds or zero-width linear region
+    const eps = (xMax - xMin) * 1e-9;
+    currentXLo = hasLeft ? Math.max(xMin + eps, Math.min(lo, xMax - 2 * eps)) : xMin;
+    currentXHi = hasRight ? Math.min(xMax - eps, Math.max(hi, xMin + 2 * eps)) : xMax;
 
-  function regionFor(v) {
-    // Walk from right so the right boundary is exclusive on the right region
-    for (let i = _regions.length - 1; i >= 0; i--) {
-      if (v >= _regions[i].domain[0]) return _regions[i];
+    if (currentXLo >= currentXHi) {
+      const s = scaleLinear().domain([xMin, xMax]).range([rMin, rMax]);
+      leftScale = midScale = rightScale = s;
+      currentR1 = rMin; currentR2 = rMax;
+      hasLeft = hasRight = false;
+      tickPool = s.ticks(10);
+      return;
     }
-    return _regions[0];
+
+    // Determine range boundaries (r1, r2)
+    let p1, p2;
+    if (_r1Override != null && _r2Override != null) {
+      p1 = _r1Override;
+      p2 = _r2Override;
+    } else {
+      const qLo = hasLeft ? Math.max(0, 0.5 - _window / 2) : 0;
+      const qHi = hasRight ? Math.min(1, 0.5 + _window / 2) : 1;
+      const wL = hasLeft ? totalPixels * qLo : 0;
+      const wR = hasRight ? totalPixels * (1 - qHi) : 0;
+      p1 = rMin + wL;
+      p2 = rMax - wR;
+    }
+
+    currentR1 = p1;
+    currentR2 = p2;
+
+    const windowSlope = (p2 - p1) / (currentXHi - currentXLo);
+
+    // Build sub-scales
+    leftScale  = symlogTail(currentXLo, xMin, p1, rMin, windowSlope);
+    midScale   = scaleLinear().domain([currentXLo, currentXHi]).range([p1, p2]);
+    rightScale = symlogTail(currentXHi, xMax, p2, rMax, windowSlope);
+
+    // Rebuild candidate pool for stable ticks
+    const set = new Set();
+    const lop = xMin > 0 ? xMin : Math.max(1e-9, xMax * 1e-7);
+    scaleLog().domain([lop, xMax]).ticks(100).forEach(v => set.add(v));
+    scaleLinear().domain([0, xMax]).ticks(100).forEach(v => { if (v > 0) set.add(v); });
+    tickPool = [...set];
   }
 
   function scale(v) {
     if (_clamp) v = Math.max(_domain[0], Math.min(_domain[1], v));
-    const region = regionFor(v);
-    // Guard log(0) — replace with epsilon before passing to sub-scale
-    const safeV = region.type === 'log' && v <= 0 ? EPSILON : v;
-    return region.scale(safeV);
+    if (hasLeft && v <= currentXLo) return leftScale(v);
+    if (hasRight && v >= currentXHi) return rightScale(v);
+    return midScale(v);
   }
 
   scale.invert = function (p) {
-    const region = _regions.find((r) => p <= r.range[1]) ?? _regions[_regions.length - 1];
-    return region.scale.invert(p);
+    const [rMin, rMax] = _range;
+    const clampP = Math.max(rMin, Math.min(rMax, p));
+    if (hasLeft && clampP <= currentR1) return leftScale.invert(clampP);
+    if (hasRight && clampP >= currentR2) return rightScale.invert(clampP);
+    return midScale.invert(clampP);
   };
 
   scale.domain = function (d) {
@@ -135,16 +179,35 @@ export function scaleAdaptive() {
     return scale;
   };
 
-  scale.breakpointMethod = function (m) {
-    if (!arguments.length) return _method;
-    _method = m;
+  scale.window = function (w) {
+    if (!arguments.length) return _window;
+    _window = +w;
     rebuild();
     return scale;
   };
 
-  scale.allocAlpha = function (a) {
-    if (!arguments.length) return _alpha;
-    _alpha = +a;
+  scale.linearDomain = function (ld) {
+    if (!arguments.length) return [currentXLo, currentXHi];
+    if (ld == null) {
+      _xLoOverride = null;
+      _xHiOverride = null;
+    } else {
+      _xLoOverride = +ld[0];
+      _xHiOverride = +ld[1];
+    }
+    rebuild();
+    return scale;
+  };
+
+  scale.linearRange = function (lr) {
+    if (!arguments.length) return [currentR1, currentR2];
+    if (lr == null) {
+      _r1Override = null;
+      _r2Override = null;
+    } else {
+      _r1Override = +lr[0];
+      _r2Override = +lr[1];
+    }
     rebuild();
     return scale;
   };
@@ -155,53 +218,80 @@ export function scaleAdaptive() {
     return scale;
   };
 
-  scale.ticks = function (count = 10) {
-    const raw = generateTicks(_regions, _range[1] - _range[0]);
-    // Remove ticks that would render within MIN_GAP pixels of the previous one.
-    const MIN_GAP = 72;
-    const filtered = [];
-    let lastPx = -Infinity;
-    for (const v of raw) {
-      const px = scale(v);
-      if (px - lastPx >= MIN_GAP) {
-        filtered.push(v);
-        lastPx = px;
-      }
-    }
-    return filtered;
+  scale.breakpointMethod = function (m) {
+    if (!arguments.length) return _method;
+    _method = m;
+    rebuild();
+    return scale;
+  };
+
+  scale.allocAlpha = function (a) {
+    if (!arguments.length) return 0.5;
+    return scale;
+  };
+
+  const tickPriority = v => {
+    if (!(v > 0)) return 0;
+    const e = Math.floor(Math.log10(v) + 1e-9);
+    const m = v / 10 ** e;
+    const r = Math.abs(m - 1) < 1e-6 ? 4 : Math.abs(m - 5) < 1e-6 ? 3
+            : Math.abs(m - 2) < 1e-6 ? 2 : Math.abs(m - Math.round(m)) < 1e-6 ? 1 : 0;
+    return r * 1000 + e;
+  };
+
+  scale.ticks = function (count = 6) {
+    const MIN_TICK_PX = 42;
+    const [rMin, rMax] = _range;
+    const [xMin, xMax] = _domain;
+    const cands = new Set(tickPool);
+    midScale.ticks(10).forEach(v => cands.add(v));
+    cands.add(xMax);
+    const placed = [...cands]
+      .map(v => ({ v, px: scale(v), pr: tickPriority(v) }))
+      .filter(c => c.px >= rMin - 1 && c.px <= rMax + 1)
+      .sort((a, b) => b.pr - a.pr);
+    const kept = [];
+    for (const c of placed) if (kept.every(k => Math.abs(k.px - c.px) >= MIN_TICK_PX)) kept.push(c);
+    return kept.sort((a, b) => a.px - b.px).map(c => c.v);
   };
 
   scale.tickFormat = function (count, specifier) {
-    return formatValue;
+    return midScale.tickFormat(count, specifier);
   };
 
   scale.copy = function () {
-    return scaleAdaptive()
+    const clone = scaleAdaptive()
       .domain(_domain.slice())
       .range(_range.slice())
       .clamp(_clamp)
+      .window(_window)
       .breakpointMethod(_method)
-      .allocAlpha(_alpha)
       .data(_data.slice());
+    if (_xLoOverride != null) clone.linearDomain([_xLoOverride, _xHiOverride]);
+    if (_r1Override != null) clone.linearRange([_r1Override, _r2Override]);
+    return clone;
+  };
+
+  scale.regions = function () {
+    const [xMin, xMax] = _domain;
+    const [rMin, rMax] = _range;
+    const list = [];
+    if (hasLeft) {
+      list.push({ type: 'log', domain: [xMin, currentXLo], range: [rMin, currentR1], pixels: currentR1 - rMin });
+    }
+    list.push({ type: 'linear', domain: [currentXLo, currentXHi], range: [currentR1, currentR2], pixels: currentR2 - currentR1 });
+    if (hasRight) {
+      list.push({ type: 'log', domain: [currentXHi, xMax], range: [currentR2, rMax], pixels: rMax - currentR2 });
+    }
+    return list;
+  };
+
+  scale.subscales = function() {
+    return { leftScale, midScale, rightScale };
   };
 
   scale.type = 'adaptive';
 
-  // Returns region descriptors — useful for rendering compression indicators
-  scale.regions = function () {
-    return _regions.map((r) => ({ type: r.type, domain: r.domain, range: r.range, pixels: r.pixels }));
-  };
-
+  rebuild();
   return scale;
-}
-
-function formatValue(v) {
-  const abs = Math.abs(v);
-  if (abs >= 1e12) return `${+(v / 1e12).toPrecision(3)}T`;
-  if (abs >= 1e9) return `${+(v / 1e9).toPrecision(3)}B`;
-  if (abs >= 1e6) return `${+(v / 1e6).toPrecision(3)}M`;
-  if (abs >= 1e3) return `${+(v / 1e3).toPrecision(3)}k`;
-  if (abs >= 1) return `${+v.toPrecision(3)}`;
-  if (abs >= 0.01) return `${+v.toPrecision(2)}`;
-  return v.toExponential(1);
 }

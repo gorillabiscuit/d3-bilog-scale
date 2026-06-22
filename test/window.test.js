@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowQuantile, windowKDE, windowMixture } from '../src/scale/window.js';
+import { windowQuantile } from '../src/scale/window.js';
 
 // Representative dataset shapes drawn from the five real datasets:
 // - narrow: SBA-like, clustered 0–150k with a few outliers to 5M
@@ -30,7 +30,7 @@ const BIMODAL = make([
 ]);
 
 const SLIDERS = [0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0];
-const METHODS = { windowQuantile, windowKDE, windowMixture };
+const METHODS = { windowQuantile };
 
 // ── Core invariant: xLo < xHi for slider > 0; xLo <= xHi for slider = 0 ──────
 // slider=0 is legitimately degenerate (window collapses to a single point —

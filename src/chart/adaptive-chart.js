@@ -1,12 +1,14 @@
-import { scaleLinear, scaleLog, scaleSymlog } from 'd3-scale';
+import { scaleLog } from 'd3-scale';
 import { extent } from 'd3-array';
 import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
 import { axisBottom } from 'd3-axis';
 import { timer } from 'd3-timer';
-import { createChart, makeFmt, MARGIN } from './base-chart.js';
+import { createChart, MARGIN } from './base-chart.js';
+import { makeFmt, fmtMult } from '../utils/format.js';
 import { detectScaleType } from '../scale/detect.js';
 import { windowQuantile } from '../scale/window.js';
+import { scaleAdaptive } from '../scale/adaptive-scale.js';
 
 export function createAdaptiveChart(points, {
   width = 900, height = 260,
@@ -52,53 +54,6 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 
 const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 
-// ── Symmetric-log tail scale ──────────────────────────────────────────────────
-// A plain log scale measures ratio, which is lopsided around a centre: ratios are
-// unbounded going up but bottom out at zero going down, so a log tail always
-// expands its small end. The symmetric quantity is DISTANCE OUTWARD from the
-// linear-window boundary — exactly what d3.scaleSymlog compresses. Each tail is a
-// real symlog fed boundary-relative distance, so BOTH tails compress outward by the
-// same law. The law is symmetric; the OUTPUT is not forced to be — a tail whose
-// data range is small stays near-linear, a tail with a huge range compresses hard.
-// True visual symmetry therefore appears only when the data is actually symmetric
-// (equal outlier range either side of a centred window); we never normalise the
-// constant to fake a mirror.
-
-// Pick the symlog constant C so the tail's slope at the boundary (distance 0) equals
-// the linear window's slope T (px per $): the represented density is continuous
-// across the seam, with no artificial jump, and C is *derived* from the data and
-// geometry rather than chosen to hit a look. d3's symlog boundary slope is
-// A / (C·ln(1 + S/C)) for range-width A over span S; it falls monotonically from
-// +∞ (C→0) to A/S (C→∞), so geometric-bisect for the unique C (or fall back to a
-// near-linear tail when the window is shallower than the tail's own average).
-function solveSymlogConstant(A, S, T) {
-  if (!(S > 0) || !(A > 0) || !(T > 0)) return 1;
-  if (T <= A / S) return S; // window shallower than the tail average → near-linear tail
-  const slopeAt = C => A / (C * Math.log1p(S / C));
-  let lo = S * 1e-9, hi = S * 1e9; // slopeAt(lo) ≫ T, slopeAt(hi) ≈ A/S < T
-  for (let i = 0; i < 80; i++) {
-    const mid = Math.sqrt(lo * hi); // C spans many orders of magnitude
-    if (slopeAt(mid) > T) lo = mid; else hi = mid;
-  }
-  return Math.sqrt(lo * hi);
-}
-
-function symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope) {
-  const span    = Math.abs(extreme - boundary) || 1;
-  const outward = Math.sign(extreme - boundary) || 1; // +1 right tail, −1 left tail
-  const base    = scaleSymlog().domain([0, span]).range([pBoundary, pExtreme]);
-  base.constant(solveSymlogConstant(Math.abs(pExtreme - pBoundary), span, windowSlope));
-
-  const scale      = x => base(outward * (x - boundary)); // feed distance from the boundary
-  scale.invert     = px => boundary + outward * base.invert(px);
-  scale.ticks      = n => base.ticks(n).map(d => boundary + outward * d);
-  scale.tickFormat = (n, s) => base.tickFormat(n, s);
-  scale.domain     = () => outward > 0 ? [boundary, extreme] : [extreme, boundary];
-  scale.range      = () => outward > 0 ? [pBoundary, pExtreme] : [pExtreme, pBoundary];
-  scale.copy       = () => symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope);
-  return scale;
-}
-
 function renderPiecewise(points, {
   width, height, window, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
@@ -110,103 +65,33 @@ function renderPiecewise(points, {
   const [xMin, xMax] = extent(points, d => d.x);
   const xValues = points.map(d => d.x);
 
-  // Use drag-handle overrides when present, otherwise quantile from slider
-  const { xLo: rawLo, xHi: rawHi } =
-    xLoOverride != null && xHiOverride != null
-      ? { xLo: xLoOverride, xHi: xHiOverride }
-      : windowQuantile(xValues, window);
+  const xScale = scaleAdaptive()
+    .domain([xMin, xMax])
+    .range([0, innerW])
+    .data(xValues)
+    .window(window)
+    .breakpointMethod('quantile'); // Use quantile matching chart slider
 
-  const eps = (xMax - xMin) * 1e-9;
-  const xLo = Math.max(xMin + eps, Math.min(rawLo, xMax - 2 * eps));
-  const xHi = Math.min(xMax - eps, Math.max(rawHi, xMin + 2 * eps));
-  if (xLo >= xHi) return renderLog(points, { width, height, xFormat, ...options });
+  if (xLoOverride != null && xHiOverride != null) {
+    xScale.linearDomain([xLoOverride, xHiOverride]);
+  }
+  if (qLoOverride != null && qHiOverride != null) {
+    xScale.linearRange([innerW * qLoOverride, innerW * qHiOverride]);
+  }
 
-  // Pixel allocation: use handle-drag overrides when present, else slider-derived
-  const qLo = qLoOverride ?? Math.max(0, 0.5 - window / 2);
-  const qHi = qHiOverride ?? Math.min(1, 0.5 + window / 2);
-
+  const [xLo, xHi] = xScale.linearDomain();
+  const [r1, r2] = xScale.linearRange();
   const r0 = 0;
-  const r1 = innerW * qLo;
-  const r2 = innerW * qHi;
   const r3 = innerW;
 
-  // Both tails are symmetric symlogs anchored at the linear-window boundary, so
-  // small-value outliers on the left compress toward the left edge exactly as
-  // large-value outliers compress toward the right edge. symlog handles 0/negatives
-  // natively, so no positive-domain clamp is needed.
-  const buildScales = (lo, hi, p1, p2) => {
-    const windowSlope = (p2 - p1) / (hi - lo); // px per $ in the linear window
-    return {
-      leftScale:  symlogTail(lo,  xMin, p1, r0, windowSlope), // boundary lo→p1, extreme xMin→r0
-      midScale:   scaleLinear().domain([lo, hi]).range([p1, p2]),
-      rightScale: symlogTail(hi, xMax, p2, r3, windowSlope),  // boundary hi→p2, extreme xMax→r3
-    };
-  };
-
-  let { leftScale, midScale, rightScale } = buildScales(xLo, xHi, r1, r2);
+  let { leftScale, midScale, rightScale } = xScale.subscales();
 
   // Mutable window state the scale reads, so a drag can update the scale (and the axis)
   // in place. leftScale/midScale/rightScale are reassigned on drag too (see applyState).
   let currentXLo = xLo, currentXHi = xHi, currentR1 = r1, currentR2 = r2;
 
-  // Fixed candidate pool over the whole data range. Because the VALUES never change, a
-  // pan slides each tick smoothly instead of re-rounding it every frame (the cause of
-  // the flicker). Log covers the low end finely; linear covers the high end finely
-  // (where a tail with a high-valued boundary expands and needs labels).
-  const tickPool = (() => {
-    const set = new Set();
-    const lop = xMin > 0 ? xMin : Math.max(1e-9, xMax * 1e-7);
-    scaleLog().domain([lop, xMax]).ticks(100).forEach(v => set.add(v));
-    scaleLinear().domain([0, xMax]).ticks(100).forEach(v => { if (v > 0) set.add(v); });
-    return [...set];
-  })();
-  // Niceness rank for de-confliction: 10ᵏ > 5·10ᵏ > 2·10ᵏ > other integer mantissa > rest,
-  // then by magnitude. Per-value (never position), so the kept set is stable under pan.
-  const tickPriority = v => {
-    if (!(v > 0)) return 0;
-    const e = Math.floor(Math.log10(v) + 1e-9);
-    const m = v / 10 ** e;
-    const r = Math.abs(m - 1) < 1e-6 ? 4 : Math.abs(m - 5) < 1e-6 ? 3
-            : Math.abs(m - 2) < 1e-6 ? 2 : Math.abs(m - Math.round(m)) < 1e-6 ? 1 : 0;
-    return r * 1000 + e;
-  };
 
-  function xScale(v) {
-    if (v <= currentXLo) return leftScale(v);
-    if (v <= currentXHi) return midScale(v);
-    return rightScale(v);
-  }
-  xScale.domain = () => [xMin, xMax];
-  xScale.range  = () => [0, innerW];
-  xScale.copy   = () => xScale;
-  xScale.ticks  = () => {
-    // Stable pool + the linear window's own adaptive ticks (for narrow windows), mapped
-    // through the current piecewise scale. Keep by niceness priority: a tick shows unless
-    // a ROUNDER one already sits within MIN_TICK_PX. Priority is per-value, so as the axis
-    // pans the round ticks always win and finer ones fill expanded regions — no flicker,
-    // no left-anchored reshuffling. (No greedy left-to-right cull, which reshuffles.)
-    const MIN_TICK_PX = 42;
-    const cands = new Set(tickPool);
-    midScale.ticks(10).forEach(v => cands.add(v));
-    cands.add(xMax);
-    const placed = [...cands]
-      .map(v => ({ v, px: xScale(v), pr: tickPriority(v) }))
-      .filter(c => c.px >= -1 && c.px <= innerW + 1)
-      .sort((a, b) => b.pr - a.pr);
-    const kept = [];
-    for (const c of placed) if (kept.every(k => Math.abs(k.px - c.px) >= MIN_TICK_PX)) kept.push(c);
-    return kept.sort((a, b) => a.px - b.px).map(c => c.v);
-  };
-  // Invert is needed for drag handles: pixel → domain value
-  xScale.invert = px => {
-    const p = Math.max(r0, Math.min(r3, px));
-    if (p <= currentR1) return leftScale.invert(p);
-    if (p <= currentR2) return midScale.invert(p);
-    return rightScale.invert(p);
-  };
-  // d3-axis calls scale.tickFormat(count, specifier) when no explicit formatter is set.
-  // Delegate to the linear mid-section — it determines the "natural" numeric precision.
-  xScale.tickFormat = (count, specifier) => midScale.tickFormat(count, specifier);
+  // Scale is configured and ticks are handled natively by scaleAdaptive
 
   // Held for redrawing the x-axis live on drag (mirrors base-chart's styling).
   const xFmt          = makeFmt(xFormat);
@@ -334,40 +219,25 @@ function renderPiecewise(points, {
   // posts at ~(tail width / RULER_MIN_PX), never thousands. Redrawn on every change.
   const leftRulerG  = g.append('g').attr('pointer-events', 'none');
   const rightRulerG = g.append('g').attr('pointer-events', 'none');
+
   const RULER_HEAD   = 2.4;                // ~20% smaller heads → a couple more arrows fit
   const ARROW_MIN_PX = 2 * RULER_HEAD + 9; // ~14px: room for a ←→ arrow
   const TEXT_MIN_PX  = 20;                 // room for a stacked "log" / "×1" label
   const RULER_MIN_PX = 2;                  // chunk narrower than this → stop (density cap)
-  // Multiplier formatter: SI for huge counts, a decimal when < 1 window, plain integers.
-  const fmtMult = n => n >= 1000 ? makeFmt('~s')(n)
-                     : n >= 10   ? Math.round(n).toString()
-                     : Number.isInteger(n) ? n.toString() : n.toFixed(1);
+  // Multiplier formatter is imported from format.js
   function drawTailRuler(grp, sub, boundary, extreme, W) {
-    grp.selectAll('*').remove();
-    if (!(W > 0) || boundary === extreme) return;
+    if (!(W > 0) || boundary === extreme) {
+      grp.selectAll('*').remove();
+      return;
+    }
     const outward = Math.sign(extreme - boundary) || 1;
     const hy = 3;
-    const arrow = (a, b, op) => {
-      grp.append('line').attr('x1', a + RULER_HEAD).attr('x2', b - RULER_HEAD).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
-        .attr('stroke', tickColor).attr('stroke-opacity', op).attr('stroke-width', 1);
-      grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', op)
-        .attr('points', `${a},${ANNOT_Y} ${a + RULER_HEAD},${ANNOT_Y - hy} ${a + RULER_HEAD},${ANNOT_Y + hy}`);
-      grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', op)
-        .attr('points', `${b},${ANNOT_Y} ${b - RULER_HEAD},${ANNOT_Y - hy} ${b - RULER_HEAD},${ANNOT_Y + hy}`);
-    };
-    // Each section's label mirrors the linear annotation: italic "log" on top, value below.
-    const label = (x, value, valOp) => {
-      grp.append('text').attr('x', x).attr('y', 8).attr('text-anchor', 'middle')
-        .attr('fill', tickColor).attr('fill-opacity', 0.3).attr('font-size', '9px').attr('font-style', 'italic')
-        .text('log');
-      grp.append('text').attr('x', x).attr('y', ANNOT_Y - 2).attr('text-anchor', 'middle')
-        .attr('fill', tickColor).attr('fill-opacity', valOp).attr('font-size', '10px').attr('font-weight', '500')
-        .text(value);
-    };
 
-    // Each W-chunk is one linear window. Every chunk gets a fill (arrow chunks also get an
-    // arrow+label; post-only chunks just get the fill and post). The fill gradient runs
-    // continuously across both types so there is no visual break at the arrow→post transition.
+    const rects = [];
+    const posts = [];
+    const arrows = [];
+    const texts = [];
+
     let collapseAt = null, lastDrawnK = -1;
     for (let k = 0; k < 4000; k++) {
       const d0 = boundary + outward * k * W;
@@ -377,15 +247,20 @@ function renderPiecewise(points, {
       const a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
       const w = b - a;
       if (w < RULER_MIN_PX) break;
-      grp.append('rect').attr('x', a).attr('width', w).attr('y', 0).attr('height', innerH)
-        .attr('fill', tickColor).attr('fill-opacity', Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX))
-        .attr('pointer-events', 'none');
-      const post = outward > 0 ? b : a;
-      grp.append('line').attr('x1', post).attr('x2', post).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
+
+      const bgOpacity = Math.min(TINT_BASE + k * TINT_STEP, TINT_MAX);
+      rects.push({ id: `bg-${k}`, x: a, w: w, opacity: bgOpacity });
+
+      const postX = outward > 0 ? b : a;
+      posts.push({ id: `post-${k}`, x: postX, opacity: 0.14 });
+
       if (w >= ARROW_MIN_PX) {
-        arrow(a, b, 0.45);
-        if (w >= TEXT_MIN_PX) label((a + b) / 2, `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`, 0.65);
+        arrows.push({ id: `arrow-${k}`, x1: a, x2: b, opacity: 0.45 });
+        if (w >= TEXT_MIN_PX) {
+          const val = `×${fmtMult(beyond ? Math.abs(extreme - d0) / W : 1)}`;
+          texts.push({ id: `lbl-t-${k}`, x: (a + b) / 2, y: 8, text: 'log', opacity: 0.3, italic: true, size: 9 });
+          texts.push({ id: `lbl-v-${k}`, x: (a + b) / 2, y: ANNOT_Y - 2, text: val, opacity: 0.65, size: 10, weight: '500' });
+        }
       } else if (collapseAt === null) {
         collapseAt = d0;
       }
@@ -393,9 +268,6 @@ function renderPiecewise(points, {
       if (beyond) break;
     }
 
-    // Sub-RULER_MIN_PX chunks are too small to draw individually. Fill that remaining region
-    // at the same opacity as the last drawn chunk (seamless gradient continuation), then
-    // annotate the entire post-only + sub-px zone with a single collapse arrow.
     if (collapseAt !== null) {
       const a = Math.min(sub(collapseAt), sub(extreme)), b = Math.max(sub(collapseAt), sub(extreme));
       const n = Math.abs(extreme - collapseAt) / W;
@@ -403,23 +275,91 @@ function renderPiecewise(points, {
         const subEdge = boundary + outward * (lastDrawnK + 1) * W;
         const sa = Math.min(sub(subEdge), sub(extreme)), sb = Math.max(sub(subEdge), sub(extreme));
         if (sb > sa) {
-          grp.append('rect').attr('x', sa).attr('width', sb - sa).attr('y', 0).attr('height', innerH)
-            .attr('fill', tickColor)
-            .attr('fill-opacity', Math.min(TINT_BASE + Math.max(0, lastDrawnK) * TINT_STEP, TINT_MAX))
-            .attr('pointer-events', 'none');
-          // Skip one step at the seam: the last drawn chunk already has a post there.
+          const bgOpacity = Math.min(TINT_BASE + Math.max(0, lastDrawnK) * TINT_STEP, TINT_MAX);
+          rects.push({ id: 'collapse-bg', x: sa, w: sb - sa, opacity: bgOpacity });
+
           const denseStart = outward > 0 ? sa + RULER_MIN_PX : sa;
           const denseEnd   = outward > 0 ? sb : sb - RULER_MIN_PX;
-          for (let x = denseStart; x <= denseEnd; x += RULER_MIN_PX)
-            grp.append('line').attr('x1', x).attr('x2', x).attr('y1', 0).attr('y2', innerH)
-              .attr('stroke', tickColor).attr('stroke-opacity', 0.14).attr('stroke-width', 1);
+          for (let x = denseStart; x <= denseEnd; x += RULER_MIN_PX) {
+            posts.push({ id: `dense-post-${x}`, x: x, opacity: 0.14 });
+          }
         }
-        if (b - a >= 2 * RULER_HEAD + 2) arrow(a, b, 0.65);
-        else grp.append('line').attr('x1', a).attr('x2', b).attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
-          .attr('stroke', tickColor).attr('stroke-opacity', 0.65).attr('stroke-width', 1);
-        label((a + b) / 2, `×${fmtMult(n)}`, 0.65);
+        arrows.push({ id: 'collapse-arrow', x1: a, x2: b, opacity: 0.65 });
+        texts.push({ id: 'collapse-lbl-t', x: (a + b) / 2, y: 8, text: 'log', opacity: 0.3, italic: true, size: 9 });
+        texts.push({ id: 'collapse-lbl-v', x: (a + b) / 2, y: ANNOT_Y - 2, text: `×${fmtMult(n)}`, opacity: 0.65, size: 10, weight: '500' });
       }
     }
+
+    // 1. Background Rectangles
+    grp.selectAll('rect.ruler-bg')
+      .data(rects, d => d.id)
+      .join('rect')
+        .attr('class', 'ruler-bg')
+        .attr('x', d => d.x)
+        .attr('width', d => d.w)
+        .attr('y', 0)
+        .attr('height', innerH)
+        .attr('fill', tickColor)
+        .attr('fill-opacity', d => d.opacity)
+        .attr('pointer-events', 'none');
+
+    // 2. Vertical Posts
+    grp.selectAll('line.ruler-post')
+      .data(posts, d => d.id)
+      .join('line')
+        .attr('class', 'ruler-post')
+        .attr('x1', d => d.x)
+        .attr('x2', d => d.x)
+        .attr('y1', 0)
+        .attr('y2', innerH)
+        .attr('stroke', tickColor)
+        .attr('stroke-opacity', d => d.opacity)
+        .attr('stroke-width', 1);
+
+    // 3. Arrow Lines and Heads
+    const arrowLines = grp.selectAll('g.ruler-arrow')
+      .data(arrows, d => d.id)
+      .join(
+        enter => {
+          const g = enter.append('g').attr('class', 'ruler-arrow');
+          g.append('line');
+          g.append('polygon').attr('class', 'arr-head-l');
+          g.append('polygon').attr('class', 'arr-head-r');
+          return g;
+        }
+      )
+      .style('opacity', d => d.opacity);
+
+    arrowLines.select('line')
+      .attr('x1', d => d.x1 + RULER_HEAD)
+      .attr('x2', d => d.x2 - RULER_HEAD)
+      .attr('y1', ANNOT_Y)
+      .attr('y2', ANNOT_Y)
+      .attr('stroke', tickColor)
+      .attr('stroke-width', 1);
+
+    arrowLines.select('.arr-head-l')
+      .attr('fill', tickColor)
+      .attr('points', d => `${d.x1},${ANNOT_Y} ${d.x1 + RULER_HEAD},${ANNOT_Y - hy} ${d.x1 + RULER_HEAD},${ANNOT_Y + hy}`);
+
+    arrowLines.select('.arr-head-r')
+      .attr('fill', tickColor)
+      .attr('points', d => `${d.x2},${ANNOT_Y} ${d.x2 - RULER_HEAD},${ANNOT_Y - hy} ${d.x2 - RULER_HEAD},${ANNOT_Y + hy}`);
+
+    // 4. Texts
+    grp.selectAll('text.ruler-lbl')
+      .data(texts, d => d.id)
+      .join('text')
+        .attr('class', 'ruler-lbl')
+        .attr('x', d => d.x)
+        .attr('y', d => d.y)
+        .attr('text-anchor', 'middle')
+        .attr('fill', tickColor)
+        .attr('fill-opacity', d => d.opacity)
+        .attr('font-size', d => `${d.size}px`)
+        .attr('font-style', d => d.italic ? 'italic' : null)
+        .attr('font-weight', d => d.weight ?? null)
+        .text(d => d.text);
   }
 
   updateLinearAnnot(r1, r2, xLo, xHi);
@@ -431,8 +371,11 @@ function renderPiecewise(points, {
     const circles = g.selectAll('circle');
 
     function applyState(newXLo, newXHi, newR1, newR2) {
-      // Reassign the scale state xScale closes over, then everything reads the new window.
-      ({ leftScale, midScale, rightScale } = buildScales(newXLo, newXHi, newR1, newR2));
+      xScale.linearDomain([newXLo, newXHi]).linearRange([newR1, newR2]);
+      const sub = xScale.subscales();
+      leftScale = sub.leftScale;
+      midScale = sub.midScale;
+      rightScale = sub.rightScale;
       currentXLo = newXLo; currentXHi = newXHi;
       currentR1  = newR1;  currentR2  = newR2;
       circles.attr('cx', d => xScale(d.x));
