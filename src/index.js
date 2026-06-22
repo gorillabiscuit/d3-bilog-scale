@@ -1,38 +1,7 @@
 import { createAdaptiveChart } from './chart/adaptive-chart.js';
-import { makeFmt }             from './chart/base-chart.js';
+import { makeFmt }             from './utils/format.js';
 import { windowQuantile }      from './scale/window.js';
 import { LOADERS }             from './data/loaders.js';
-
-// ── Theme presets ────────────────────────────────────────────────────────────
-
-const THEMES = {
-  dark: {
-    dotColor:        '#7070ff',
-    axisColor:       '#3a3a6a',
-    axisTextColor:   '#a0a0c0',
-    labelColor:      '#6060a0',
-    tooltipBg:       '#0d1a33',
-    tooltipBorder:   '#3a3a6a',
-    tooltipTextColor:'#e0e0f0',
-    tooltipTextMuted:'#a0a0c0',
-    overlayColor:    'white',
-    tickColor:       'white',
-    chartBg:         '#16213e',
-  },
-  light: {
-    dotColor:        '#4040cc',
-    axisColor:       '#c0c0d8',
-    axisTextColor:   '#5050a0',
-    labelColor:      '#8080b0',
-    tooltipBg:       '#f0f0ff',
-    tooltipBorder:   '#c0c0d8',
-    tooltipTextColor:'#1a1a2e',
-    tooltipTextMuted:'#5050a0',
-    overlayColor:    '#4040cc',
-    tickColor:       '#4040cc',
-    chartBg:         '#ffffff',
-  },
-};
 
 // ── UI refs ──────────────────────────────────────────────────────────────────
 
@@ -86,7 +55,6 @@ function renderExperimental() {
   if (!currentDataset) return;
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
   const slider = +alphaSlider.value;
-  const theme  = THEMES[currentTheme];
 
   const container = document.getElementById('chart-adaptive');
   container.replaceChildren(
@@ -117,8 +85,6 @@ function renderExperimental() {
         renderExperimental();
       },
       xLabel, yLabel, xFormat, yFormat,
-      // appearance
-      ...theme,
       showLocalRate: true,
     })
   );
@@ -157,9 +123,10 @@ alphaSlider.addEventListener('input', () => {
 
 themeToggle.addEventListener('click', () => {
   currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  // Flip the attribute only — the chart's colours are CSS custom properties, so the live
+  // SVG reskins instantly without a rebuild.
   document.documentElement.setAttribute('data-theme', currentTheme);
   themeToggle.textContent = currentTheme === 'dark' ? '☀ Light' : '☾ Dark';
-  renderExperimental();
 });
 
 let _resizeTimer;

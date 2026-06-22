@@ -22,9 +22,6 @@ export function createAdaptiveChart(points, {
   onWindowDrag,        // callback({ xLo, xHi }) fired on every drag move (lightweight)
   onWindowChange,      // callback({ xLo, xHi, qLo?, qHi? }) fired on dragend (triggers re-render)
   tailTicks = 6,       // max ruler lines in each tail
-  overlayColor = 'white',
-  tickColor = 'white',
-  chartBg,             // chart background color for text halo on span annotation
   ...options
 } = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -36,7 +33,7 @@ export function createAdaptiveChart(points, {
     : renderPiecewise(points, {
         width, height, window, xFormat,
         xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
-        tailTicks, overlayColor, tickColor, chartBg,
+        tailTicks,
         ...options,
       });
 }
@@ -57,13 +54,14 @@ const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 function renderPiecewise(points, {
   width, height, window, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
-  tailTicks, overlayColor, tickColor, chartBg,
+  tailTicks,
   ...options
 }) {
   const innerW = width  - MARGIN.left - MARGIN.right;
   const innerH = height - MARGIN.top  - MARGIN.bottom;
   const [xMin, xMax] = extent(points, d => d.x);
   const xValues = points.map(d => d.x);
+  const eps = (xMax - xMin) * 1e-9;
 
   const xScale = scaleAdaptive()
     .domain([xMin, xMax])
@@ -91,12 +89,8 @@ function renderPiecewise(points, {
   let currentXLo = xLo, currentXHi = xHi, currentR1 = r1, currentR2 = r2;
 
 
-  // Scale is configured and ticks are handled natively by scaleAdaptive
-
-  // Held for redrawing the x-axis live on drag (mirrors base-chart's styling).
-  const xFmt          = makeFmt(xFormat);
-  const axisColor     = options.axisColor ?? '#3a3a6a';
-  const axisTextColor = options.axisTextColor ?? '#a0a0c0';
+  // Held for redrawing the x-axis live on drag. Colour comes from CHART_CSS (.tick/.domain).
+  const xFmt = makeFmt(xFormat);
 
   const node = createChart(points, xScale, { width, height, xFormat, ...options });
   const g = select(node).select('g');
@@ -107,7 +101,7 @@ function renderPiecewise(points, {
   const overlay = g.append('rect')
       .attr('x', r1).attr('width', Math.max(0, r2 - r1))
       .attr('y', 0).attr('height', innerH)
-      .attr('fill', overlayColor).attr('fill-opacity', 0)
+      .attr('fill', 'transparent')
       .attr('pointer-events', 'all')
       .attr('tabindex', '0')
       .attr('role', 'slider')
@@ -142,14 +136,16 @@ function renderPiecewise(points, {
     const w = hw(s.text);
     const hg = g.append('g').attr('pointer-events', 'none').style('opacity', 0.9);
     hg.append('rect')
+      .attr('class', 'pan-hint-bg')
       .attr('x', s.x - w / 2).attr('y', cy - hintH / 2)
       .attr('width', w).attr('height', hintH).attr('rx', hintH / 2)
-      .attr('fill', tickColor).attr('fill-opacity', 0.12)
-      .attr('stroke', tickColor).attr('stroke-opacity', 0.3).attr('stroke-width', 1);
+      .attr('fill-opacity', 0.12)
+      .attr('stroke-opacity', 0.3).attr('stroke-width', 1);
     hg.append('text')
+      .attr('class', 'pan-hint-text')
       .attr('x', s.x).attr('y', cy + hintFontSize * 0.35)
       .attr('text-anchor', 'middle')
-      .attr('fill', tickColor).attr('fill-opacity', 0.65)
+      .attr('fill-opacity', 0.65)
       .attr('font-size', `${hintFontSize}px`)
       .text(s.text);
     hg.style('transition', 'opacity 0.8s');
@@ -174,22 +170,22 @@ function renderPiecewise(points, {
 
     grp.append('text')
       .attr('class', 'annot-type').attr('y', 8).attr('text-anchor', 'middle')
-      .attr('fill', tickColor).attr('fill-opacity', 0.3)
+      .attr('fill-opacity', 0.3)
       .attr('font-size', '9px').attr('font-style', 'italic')
       .text(typeLabel);
 
+    // .annot-value carries its text-halo (paint-order + stroke = --chart-surface) from CHART_CSS.
     const valueTxt = grp.append('text')
       .attr('class', 'annot-value').attr('y', ANNOT_Y - 2).attr('text-anchor', 'middle')
-      .attr('fill', tickColor).attr('fill-opacity', 0.65)
-      .attr('font-size', '10px').attr('font-weight', '500')
-      .style('paint-order', 'stroke fill');
-    if (chartBg) valueTxt.attr('stroke', chartBg).attr('stroke-width', 3);
+      .attr('fill-opacity', 0.65)
+      .attr('font-size', '10px').attr('font-weight', '500');
 
     const dimLine = grp.append('line')
+      .attr('class', 'annot-line')
       .attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
-      .attr('stroke', tickColor).attr('stroke-opacity', 0.45).attr('stroke-width', 1);
-    const arrL = grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', 0.45);
-    const arrR = grp.append('polygon').attr('fill', tickColor).attr('fill-opacity', 0.45);
+      .attr('stroke-opacity', 0.45).attr('stroke-width', 1);
+    const arrL = grp.append('polygon').attr('class', 'annot-arrow').attr('fill-opacity', 0.45);
+    const arrR = grp.append('polygon').attr('class', 'annot-arrow').attr('fill-opacity', 0.45);
 
     return function update(p1, p2, lo, hi) {
       if (p2 - p1 < 2 * ANNOT_ARR + 28) { grp.style('display', 'none'); return; }
@@ -224,7 +220,6 @@ function renderPiecewise(points, {
   const ARROW_MIN_PX = 2 * RULER_HEAD + 9; // ~14px: room for a ←→ arrow
   const TEXT_MIN_PX  = 20;                 // room for a stacked "log" / "×1" label
   const RULER_MIN_PX = 2;                  // chunk narrower than this → stop (density cap)
-  // Multiplier formatter is imported from format.js
   function drawTailRuler(grp, sub, boundary, extreme, W) {
     if (!(W > 0) || boundary === extreme) {
       grp.selectAll('*').remove();
@@ -299,7 +294,6 @@ function renderPiecewise(points, {
         .attr('width', d => d.w)
         .attr('y', 0)
         .attr('height', innerH)
-        .attr('fill', tickColor)
         .attr('fill-opacity', d => d.opacity)
         .attr('pointer-events', 'none');
 
@@ -312,7 +306,6 @@ function renderPiecewise(points, {
         .attr('x2', d => d.x)
         .attr('y1', 0)
         .attr('y2', innerH)
-        .attr('stroke', tickColor)
         .attr('stroke-opacity', d => d.opacity)
         .attr('stroke-width', 1);
 
@@ -335,15 +328,12 @@ function renderPiecewise(points, {
       .attr('x2', d => d.x2 - RULER_HEAD)
       .attr('y1', ANNOT_Y)
       .attr('y2', ANNOT_Y)
-      .attr('stroke', tickColor)
       .attr('stroke-width', 1);
 
     arrowLines.select('.arr-head-l')
-      .attr('fill', tickColor)
       .attr('points', d => `${d.x1},${ANNOT_Y} ${d.x1 + RULER_HEAD},${ANNOT_Y - hy} ${d.x1 + RULER_HEAD},${ANNOT_Y + hy}`);
 
     arrowLines.select('.arr-head-r')
-      .attr('fill', tickColor)
       .attr('points', d => `${d.x2},${ANNOT_Y} ${d.x2 - RULER_HEAD},${ANNOT_Y - hy} ${d.x2 - RULER_HEAD},${ANNOT_Y + hy}`);
 
     // 4. Texts
@@ -354,7 +344,6 @@ function renderPiecewise(points, {
         .attr('x', d => d.x)
         .attr('y', d => d.y)
         .attr('text-anchor', 'middle')
-        .attr('fill', tickColor)
         .attr('fill-opacity', d => d.opacity)
         .attr('font-size', d => `${d.size}px`)
         .attr('font-style', d => d.italic ? 'italic' : null)
@@ -382,11 +371,8 @@ function renderPiecewise(points, {
       overlay.attr('x', newR1).attr('width', Math.max(0, newR2 - newR1));
       leftHandle?.attr('transform',  `translate(${newR1},0)`);
       rightHandle?.attr('transform', `translate(${newR2},0)`);
-      // Live x-axis redraw — same styling base-chart applies on first render.
-      g.select('.x-axis').call(axisBottom(xScale).ticks(6).tickFormat(xFmt))
-        .call(a => a.select('.domain').attr('stroke', axisColor))
-        .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
-        .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
+      // Live x-axis redraw — colour is inherited from CHART_CSS, so just rebind the axis.
+      g.select('.x-axis').call(axisBottom(xScale).ticks(6).tickFormat(xFmt));
       updateLinearAnnot(newR1, newR2, newXLo, newXHi);
       drawTailRuler(leftRulerG,  leftScale,  newXLo, xMin, newXHi - newXLo);
       drawTailRuler(rightRulerG, rightScale, newXHi, xMax, newXHi - newXLo);
@@ -422,24 +408,27 @@ function renderPiecewise(points, {
         .style('pointer-events', 'stroke');
 
       handle.append('line')
+        .attr('class', 'handle-line')
         .attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', innerH)
-        .attr('stroke', tickColor).attr('stroke-width', 1).attr('stroke-opacity', 0.3)
+        .attr('stroke-width', 1).attr('stroke-opacity', 0.3)
         .style('pointer-events', 'none');
 
       const pillW = 8, pillH = 20;
       const pillY  = innerH / 2 - pillH / 2;
       const pill = handle.append('rect')
+        .attr('class', 'handle-pill')
         .attr('x', -pillW / 2).attr('y', pillY)
         .attr('width', pillW).attr('height', pillH)
         .attr('rx', pillW / 2)
-        .attr('fill', tickColor).attr('fill-opacity', 0.22);
+        .attr('fill-opacity', 0.22);
 
       [-2, 2].forEach(cx =>
         [-5, 0, 5].forEach(dy =>
           handle.append('circle')
+            .attr('class', 'handle-grip')
             .attr('cx', cx).attr('cy', innerH / 2 + dy)
             .attr('r', 1)
-            .attr('fill', tickColor).attr('fill-opacity', 0.6)
+            .attr('fill-opacity', 0.6)
         )
       );
 

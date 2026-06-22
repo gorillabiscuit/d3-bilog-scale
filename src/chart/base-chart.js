@@ -3,9 +3,6 @@ import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { extent } from 'd3-array';
 import { makeFmt } from '../utils/format.js';
-export { makeFmt };
-
-
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 
@@ -13,6 +10,38 @@ export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 // Observable renders many cells simultaneously — a shared id silently breaks clipping.
 let _clipId = 0;
 
+// Stylesheet injected into every chart SVG. The division of labour is strict: JS owns geometry
+// and data-driven opacity (dot density, ruler tint ramp); CSS owns every colour, via custom
+// properties. Fallbacks match the dark theme, so a chart pasted into an Observable cell renders
+// standalone — define the --tokens (see index.html) to theme it, e.g. by toggling data-theme.
+export const CHART_CSS = `
+.chart .dot { fill: var(--dot-fill, #7070ff); }
+.chart .domain,
+.chart .tick line { stroke: var(--axis-color, #3a3a6a); }
+.chart .tick text { fill: var(--axis-text, #a0a0c0); }
+.chart .axis-label { fill: var(--label-color, #6060a0); }
+.chart .tt-bg { fill: var(--tooltip-bg, #0d1a33); stroke: var(--tooltip-border, #3a3a6a); }
+.chart .tt-line1 { fill: var(--tooltip-text, #e0e0f0); }
+.chart .tt-line2,
+.chart .tt-line3 { fill: var(--tooltip-text-muted, #a0a0c0); }
+.chart .ruler-bg,
+.chart .ruler-lbl,
+.chart .pan-hint-bg,
+.chart .pan-hint-text,
+.chart .annot-type,
+.chart .annot-value,
+.chart .annot-arrow,
+.chart .handle-pill,
+.chart .handle-grip { fill: var(--ruler-tint, #fff); }
+.chart .ruler-post,
+.chart .ruler-line,
+.chart .handle-line,
+.chart .annot-line,
+.chart .pan-hint-bg,
+.chart .ruler-arrow line { stroke: var(--ruler-tint, #fff); }
+.chart .ruler-arrow polygon { fill: var(--ruler-tint, #fff); }
+.chart .annot-value { paint-order: stroke fill; stroke: var(--chart-surface, #16213e); stroke-width: 3px; }
+`;
 
 /**
  * Create a scatterplot SVG node.
@@ -33,18 +62,9 @@ export function createChart(points, xScale, {
   xFormat      = '~s',
   yFormat      = '~s',
   clipPadding,           // extra px around the plot area before clipping; defaults to dot radius
-  showLocalRate     = false, // show "1px ≈ $X" in tooltip — useful for non-linear scales
-  // --- appearance ---
-  dotColor          = '#7070ff',
+  showLocalRate = false, // show "1px ≈ $X" in tooltip — useful for non-linear scales
   dotRadius,             // undefined → auto-size by point count
   dotOpacity,            // undefined → auto-size by density
-  axisColor         = '#3a3a6a',
-  axisTextColor     = '#a0a0c0',
-  labelColor        = '#6060a0',
-  tooltipBg         = '#0d1a33',
-  tooltipBorder     = '#3a3a6a',
-  tooltipTextColor  = '#e0e0f0',
-  tooltipTextMuted  = '#a0a0c0',
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
@@ -66,11 +86,14 @@ export function createChart(points, xScale, {
   const yFmt = makeFmt(yFormat);
 
   const svg = create('svg')
+    .attr('class', 'chart')
     .attr('viewBox', [0, 0, width, height])
     .style('width', '100%')
     .style('height', '100%')
     .style('overflow', 'visible')
     .style('font', '10px sans-serif');
+
+  svg.append('style').text(CHART_CSS);
 
   svg.append('defs')
     .append('clipPath')
@@ -87,18 +110,12 @@ export function createChart(points, xScale, {
   g.append('g')
     .attr('class', 'x-axis')
     .attr('transform', `translate(0,${innerH})`)
-    .call(axisBottom(xScale).ticks(6).tickFormat(xFmt))
-    .call(a => a.select('.domain').attr('stroke', axisColor))
-    .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
-    .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
+    .call(axisBottom(xScale).ticks(6).tickFormat(xFmt));
 
   // ── y-axis ───────────────────────────────────────────────────────────────
   g.append('g')
     .attr('class', 'y-axis')
-    .call(axisLeft(yScale).ticks(5).tickFormat(yFmt))
-    .call(a => a.select('.domain').attr('stroke', axisColor))
-    .call(a => a.selectAll('.tick line').attr('stroke', axisColor))
-    .call(a => a.selectAll('.tick text').attr('fill', axisTextColor).attr('font-size', '10px'));
+    .call(axisLeft(yScale).ticks(5).tickFormat(yFmt));
 
   // ── SVG-internal tooltip ─────────────────────────────────────────────────
   const tt = g.append('g')
@@ -109,20 +126,18 @@ export function createChart(points, xScale, {
   tt.append('rect')
     .attr('class', 'tt-bg')
     .attr('rx', 4)
-    .attr('fill', tooltipBg)
-    .attr('stroke', tooltipBorder)
     .attr('stroke-width', 1);
 
   tt.append('text').attr('class', 'tt-line1')
-    .attr('fill', tooltipTextColor).attr('font-size', '11px')
+    .attr('font-size', '11px')
     .attr('x', 8).attr('y', 17);
 
   tt.append('text').attr('class', 'tt-line2')
-    .attr('fill', tooltipTextMuted).attr('font-size', '11px')
+    .attr('font-size', '11px')
     .attr('x', 8).attr('y', 33);
 
   tt.append('text').attr('class', 'tt-line3')
-    .attr('fill', tooltipTextMuted).attr('font-size', '10px')
+    .attr('font-size', '10px')
     .attr('x', 8).attr('y', 49);
 
   // ── Dots ─────────────────────────────────────────────────────────────────
@@ -131,15 +146,14 @@ export function createChart(points, xScale, {
     .selectAll('circle')
     .data(points)
     .join('circle')
+      .attr('class', 'dot')
       .attr('cx', d => xScale(d.x))
       .attr('cy', d => yScale(d.y))
       .attr('r', r)
-      .attr('fill', dotColor)
       .attr('fill-opacity', autoOpacity)
     .on('pointerenter', function(event, d) {
       select(this).raise()
         .attr('r', r + 2)
-        .attr('fill', dotColor)
         .attr('fill-opacity', 1);
 
       const line1 = `${xLabel}: ${xFmt(d.x)}`;
@@ -173,7 +187,6 @@ export function createChart(points, xScale, {
     .on('pointerleave', function() {
       select(this)
         .attr('r', r)
-        .attr('fill', dotColor)
         .attr('fill-opacity', autoOpacity);
       tt.style('display', 'none');
     });
@@ -186,16 +199,18 @@ export function createChart(points, xScale, {
 
   // ── Axis labels ──────────────────────────────────────────────────────────
   g.append('text')
+    .attr('class', 'axis-label')
     .attr('x', innerW / 2).attr('y', innerH + 44)
     .attr('text-anchor', 'middle')
-    .attr('fill', labelColor).attr('font-size', '11px')
+    .attr('font-size', '11px')
     .text(xLabel);
 
   g.append('text')
+    .attr('class', 'axis-label')
     .attr('transform', 'rotate(-90)')
     .attr('x', -innerH / 2).attr('y', -44)
     .attr('text-anchor', 'middle')
-    .attr('fill', labelColor).attr('font-size', '11px')
+    .attr('font-size', '11px')
     .text(yLabel);
 
   return svg.node();
