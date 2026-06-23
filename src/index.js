@@ -9,6 +9,7 @@ const datasetSelector = document.getElementById('dataset-selector');
 const alphaSlider     = document.getElementById('alpha-slider');
 const alphaValue      = document.getElementById('alpha-value');
 const themeToggle     = document.getElementById('theme-toggle');
+const jitterToggle    = document.getElementById('jitter-toggle');
 
 // ── App state ────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,8 @@ let manualXLo = null, manualXHi = null;
 let manualQLo = null, manualQHi = null;
 
 let currentTheme = 'dark';
+let jitterEnabled = true;
+let chartNode = null;  // current SVG element — setJitter() animates it in place
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -52,36 +55,36 @@ function renderExperimental() {
   const slider = +alphaSlider.value;
 
   const container = document.getElementById('chart-adaptive');
-  container.replaceChildren(
-    createAdaptiveChart(points, {
-      width: container.clientWidth, height: container.clientHeight,
-      mode: 'piecewise', window: slider,
-      xLo: manualXLo ?? undefined,
-      xHi: manualXHi ?? undefined,
-      qLo: manualQLo ?? undefined,
-      qHi: manualQHi ?? undefined,
-      onWindowDrag: ({ xLo, xHi, qLo, qHi }) => {
-        updateRangeDisplay(xLo, xHi, xFormat);
-        if (qLo != null && qHi != null) {
-          const w = qHi - qLo;
-          alphaSlider.value = w;
-          alphaValue.textContent = w.toFixed(2);
-        }
-      },
-      onWindowChange: ({ xLo, xHi, qLo, qHi }) => {
-        manualXLo = xLo; manualXHi = xHi;
-        if (qLo != null) manualQLo = qLo;
-        if (qHi != null) manualQHi = qHi;
-        if (qLo != null && qHi != null) {
-          const w = qHi - qLo;
-          alphaSlider.value = w;
-          alphaValue.textContent = w.toFixed(2);
-        }
-        renderExperimental();
-      },
-      xLabel, yLabel, xFormat, yFormat, rankNoun: noun, jitter: true,
-    })
-  );
+  const el = createAdaptiveChart(points, {
+    width: container.clientWidth, height: container.clientHeight,
+    mode: 'piecewise', window: slider,
+    xLo: manualXLo ?? undefined,
+    xHi: manualXHi ?? undefined,
+    qLo: manualQLo ?? undefined,
+    qHi: manualQHi ?? undefined,
+    onWindowDrag: ({ xLo, xHi, qLo, qHi }) => {
+      updateRangeDisplay(xLo, xHi, xFormat);
+      if (qLo != null && qHi != null) {
+        const w = qHi - qLo;
+        alphaSlider.value = w;
+        alphaValue.textContent = w.toFixed(2);
+      }
+    },
+    onWindowChange: ({ xLo, xHi, qLo, qHi }) => {
+      manualXLo = xLo; manualXHi = xHi;
+      if (qLo != null) manualQLo = qLo;
+      if (qHi != null) manualQHi = qHi;
+      if (qLo != null && qHi != null) {
+        const w = qHi - qLo;
+        alphaSlider.value = w;
+        alphaValue.textContent = w.toFixed(2);
+      }
+      renderExperimental();
+    },
+    xLabel, yLabel, xFormat, yFormat, rankNoun: noun, jitter: jitterEnabled,
+  });
+  container.replaceChildren(el);
+  chartNode = el;
   // The chart reports its actual (capped) window via onWindowDrag during render, which drives
   // the range readout — so it always matches what's drawn rather than the raw slider quantiles.
 }
@@ -105,6 +108,12 @@ alphaSlider.addEventListener('input', () => {
 
   if (_raf) cancelAnimationFrame(_raf);
   _raf = requestAnimationFrame(() => { renderExperimental(); _raf = null; });
+});
+
+jitterToggle.addEventListener('click', () => {
+  jitterEnabled = !jitterEnabled;
+  jitterToggle.classList.toggle('is-active', jitterEnabled);
+  chartNode?.setJitter(jitterEnabled);
 });
 
 themeToggle.addEventListener('click', () => {

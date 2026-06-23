@@ -1,4 +1,6 @@
 import { create, pointer, select } from 'd3-selection';
+import 'd3-transition';  // patches Selection.prototype with .transition()
+import { easeBackOut, easeCubicInOut } from 'd3-ease';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { extent, bisectLeft } from 'd3-array';
@@ -155,23 +157,22 @@ export function createChart(points, xScale, {
       .attr('r', r)
       .attr('fill-opacity', autoOpacity);
 
-  // Y-only jitter: x is frozen (the scale axis must stay exact); forceCollide
-  // pushes overlapping dots apart on y; forceY pulls them back toward their
-  // true position so the displacement stays honest (never more than ~1–2 radii).
-  if (jitter) {
-    const nodes = points.map(d => ({
-      fx: xScale(d.x),   // frozen — forceSimulation will never move x
-      x:  xScale(d.x),
-      y:  yScale(d.y),
-      cy0: yScale(d.y),  // true y, used by the restoring force
-    }));
-    forceSimulation(nodes)
-      .force('collide', forceCollide(r + 1).strength(0.8))
-      .force('y', forceY(d => d.cy0).strength(0.3))
-      .stop()
-      .tick(120);
-    circles.attr('cy', (_, i) => nodes[i].y);
-  }
+  // Always pre-compute jitter positions so setJitter() can animate between them
+  // without a full re-render. x is frozen via fx; forceCollide separates overlapping
+  // dots on y; forceY pulls them back so displacement stays ≤ 1–2 radii.
+  const jNodes = points.map(d => ({
+    fx:  xScale(d.x),
+    x:   xScale(d.x),
+    y:   yScale(d.y),   // mutated by simulation → jittered position
+    cy0: yScale(d.y),   // original position (restoring force target + toggle reference)
+  }));
+  forceSimulation(jNodes)
+    .force('collide', forceCollide(r + 1).strength(0.8))
+    .force('y', forceY(d => d.cy0).strength(0.3))
+    .stop()
+    .tick(120);
+
+  circles.attr('cy', (_, i) => jitter ? jNodes[i].y : jNodes[i].cy0);
 
   circles.on('pointerenter', function(event, d) {
       select(this).raise()
@@ -239,5 +240,13 @@ export function createChart(points, xScale, {
     .attr('font-size', '11px')
     .text(yLabel);
 
-  return svg.node();
+  // Expose in-place jitter toggle — callers animate without rebuilding the SVG.
+  const svgNode = svg.node();
+  svgNode.setJitter = (enabled, duration = 500) => {
+    circles.transition()
+      .duration(duration)
+      .ease(enabled ? easeBackOut.overshoot(1.4) : easeCubicInOut)
+      .attr('cy', (_, i) => enabled ? jNodes[i].y : jNodes[i].cy0);
+  };
+  return svgNode;
 }

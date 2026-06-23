@@ -125,6 +125,11 @@
       transition: background 0.15s, border-color 0.2s, color 0.2s;
     }
     button:hover { background: var(--border); }
+    button.is-active {
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
 
     .chart-toolbar input[type="range"] {
       width: 160px;
@@ -187,6 +192,7 @@
       <div class="toolbar-gap"></div>
 
       <span id="status"></span>
+      <button id="jitter-toggle" class="is-active">Jitter</button>
       <button id="theme-toggle">☀ Light</button>
     </div>
 
