@@ -1,7 +1,7 @@
 import { create, pointer, select } from 'd3-selection';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
-import { extent } from 'd3-array';
+import { extent, bisectLeft } from 'd3-array';
 import { makeFmt } from '../utils/format.js';
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
@@ -21,9 +21,9 @@ export const CHART_CSS = `
 .chart .tick text { fill: var(--axis-text, #a0a0c0); }
 .chart .axis-label { fill: var(--label-color, #6060a0); }
 .chart .tt-bg { fill: var(--tooltip-bg, #0d1a33); stroke: var(--tooltip-border, #3a3a6a); }
-.chart .tt-line1 { fill: var(--tooltip-text, #e0e0f0); }
-.chart .tt-line2,
-.chart .tt-line3 { fill: var(--tooltip-text-muted, #a0a0c0); }
+.chart .tt-label { fill: var(--tooltip-text, #e0e0f0); font-weight: 600; }
+.chart .tt-text { fill: var(--tooltip-text, #e0e0f0); }
+.chart .tt-muted { fill: var(--tooltip-text-muted, #a0a0c0); }
 .chart .ruler-bg,
 .chart .ruler-lbl,
 .chart .pan-hint-bg,
@@ -61,10 +61,10 @@ export function createChart(points, xScale, {
   yLabel       = 'y',
   xFormat      = '~s',
   yFormat      = '~s',
-  clipPadding,           // extra px around the plot area before clipping; defaults to dot radius
-  showLocalRate = false, // show "1px ≈ $X" in tooltip — useful for non-linear scales
-  dotRadius,             // undefined → auto-size by point count
-  dotOpacity,            // undefined → auto-size by density
+  clipPadding,             // extra px around the plot area before clipping; defaults to dot radius
+  rankNoun     = 'points', // plural noun for the tooltip's percentile line ("… of companies")
+  dotRadius,               // undefined → auto-size by point count
+  dotOpacity,              // undefined → auto-size by density
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
@@ -128,17 +128,18 @@ export function createChart(points, xScale, {
     .attr('rx', 4)
     .attr('stroke-width', 1);
 
-  tt.append('text').attr('class', 'tt-line1')
-    .attr('font-size', '11px')
-    .attr('x', 8).attr('y', 17);
-
-  tt.append('text').attr('class', 'tt-line2')
-    .attr('font-size', '11px')
-    .attr('x', 8).attr('y', 33);
-
-  tt.append('text').attr('class', 'tt-line3')
-    .attr('font-size', '10px')
-    .attr('x', 8).attr('y', 49);
+  // Percentile rank of each point by x (the skewed variable) — answers "where does this sit in
+  // the distribution", which is what the scale is all about. Sorted once; bisect per hover.
+  const xSorted = points.map(d => d.x).sort((a, b) => a - b);
+  const n = xSorted.length;
+  const rankLine = x => {
+    const pct = Math.round((bisectLeft(xSorted, x) / Math.max(1, n)) * 100);
+    return pct >= 50
+      ? `bigger than ${Math.min(pct, 99)}% of ${rankNoun}`
+      : `smaller than ${Math.min(100 - pct, 99)}% of ${rankNoun}`;
+  };
+  const truncate = (s, max) => (s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s);
+  const TT_LINE_H = 16, TT_PAD_X = 8;
 
   // ── Dots ─────────────────────────────────────────────────────────────────
   g.append('g')
@@ -156,22 +157,26 @@ export function createChart(points, xScale, {
         .attr('r', r + 2)
         .attr('fill-opacity', 1);
 
-      const line1 = `${xLabel}: ${xFmt(d.x)}`;
-      const line2 = `${yLabel}: ${yFmt(d.y)}`;
-      tt.select('.tt-line1').text(line1);
-      tt.select('.tt-line2').text(line2);
+      // Lead with the point's identity (name/title/place), then the two values, then its
+      // rank in the distribution. label/meta come from the loader; absent → those lines drop.
+      const lines = [];
+      if (d.label) lines.push({ text: truncate(String(d.label), 46), cls: 'tt-label' });
+      if (d.meta)  lines.push({ text: truncate(String(d.meta), 46),  cls: 'tt-muted' });
+      lines.push({ text: `${xLabel}: ${xFmt(d.x)}`, cls: 'tt-text' });
+      lines.push({ text: `${yLabel}: ${yFmt(d.y)}`, cls: 'tt-muted' });
+      lines.push({ text: rankLine(d.x),             cls: 'tt-muted' });
 
-      let ttH = 46;
-      let maxLen = Math.max(line1.length, line2.length);
-      if (showLocalRate) {
-        const cx = xScale(d.x);
-        const rate = Math.abs(xScale.invert(cx + 1) - xScale.invert(cx));
-        const line3 = `1px ≈ ${xFmt(rate)}`;
-        tt.select('.tt-line3').text(line3);
-        maxLen = Math.max(maxLen, line3.length);
-        ttH = 58;
-      }
-      const ttW = maxLen * 6.5 + 16;
+      tt.selectAll('text.tt-line')
+        .data(lines)
+        .join('text')
+          .attr('class', l => `tt-line ${l.cls}`)
+          .attr('x', TT_PAD_X)
+          .attr('y', (l, i) => 17 + i * TT_LINE_H)
+          .attr('font-size', l => (l.cls === 'tt-label' ? '11.5px' : '10.5px'))
+          .text(l => l.text);
+
+      const ttW = Math.max(...lines.map(l => l.text.length)) * 6.4 + TT_PAD_X * 2;
+      const ttH = lines.length * TT_LINE_H + 14;
       tt.select('.tt-bg').attr('width', ttW).attr('height', ttH);
 
       tt.raise().style('display', null);

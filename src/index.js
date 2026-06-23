@@ -52,7 +52,7 @@ function updateRangeDisplay(xLo, xHi, xFormat) {
 
 function renderExperimental() {
   if (!currentDataset) return;
-  const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s' } = currentDataset;
+  const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s', noun = 'points' } = currentDataset;
   const slider = +alphaSlider.value;
 
   const container = document.getElementById('chart-adaptive');
@@ -83,8 +83,7 @@ function renderExperimental() {
         }
         renderExperimental();
       },
-      xLabel, yLabel, xFormat, yFormat,
-      showLocalRate: true,
+      xLabel, yLabel, xFormat, yFormat, rankNoun: noun,
     })
   );
   // The chart reports its actual (capped) window via onWindowDrag during render, which drives
