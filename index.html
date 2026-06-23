@@ -9,15 +9,14 @@
 
     /* ── Theme tokens ──────────────────────────────────────────────────── */
     :root {
-      --bg:          #1a1a2e;
-      --surface:     #16213e;
-      --border:      #2a2a5a;
-      --text:        #e0e0f0;
-      --text-muted:  #a0a0c0;
-      --text-faint:  #6060a0;
-      --accent:      #7070ff;
+      --bg:                #1a1a2e;
+      --surface:           #16213e;
+      --border:            #2a2a5a;
+      --text:              #e0e0f0;
+      --text-muted:        #a0a0c0;
+      --text-faint:        #6060a0;
+      --accent:            #7070ff;
 
-      /* Chart tokens — consumed by CHART_CSS inside each SVG. JS sets no colours. */
       --dot-fill:          #7070ff;
       --axis-color:        #3a3a6a;
       --axis-text:         #a0a0c0;
@@ -30,13 +29,13 @@
       --chart-surface:     #16213e;
     }
     [data-theme="light"] {
-      --bg:          #f5f5fb;
-      --surface:     #ffffff;
-      --border:      #d0d0e8;
-      --text:        #1a1a2e;
-      --text-muted:  #5050a0;
-      --text-faint:  #9090b0;
-      --accent:      #4040cc;
+      --bg:                #f5f5fb;
+      --surface:           #ffffff;
+      --border:            #d0d0e8;
+      --text:              #1a1a2e;
+      --text-muted:        #5050a0;
+      --text-faint:        #9090b0;
+      --accent:            #4040cc;
 
       --dot-fill:          #4040cc;
       --axis-color:        #c0c0d8;
@@ -59,70 +58,76 @@
       height: 100vh;
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
-      padding: 1.5rem;
+      padding: 1rem;
       transition: background 0.2s, color 0.2s;
     }
 
-    header {
+    /* ── Chart card — single visual unit ────────────────────────────────── */
+    .chart-card {
+      flex: 1;
+      min-height: 0;
       display: flex;
-      align-items: center;
-      gap: 1.5rem;
-      flex-shrink: 0;
-      overflow: hidden;
-    }
-
-    h1 {
-      font-size: 1.1rem;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      white-space: nowrap;
-    }
-
-    label {
-      font-size: 0.875rem;
-      color: var(--text-muted);
-    }
-
-    select, button {
+      flex-direction: column;
       background: var(--surface);
-      color: var(--text);
       border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.3rem 0.6rem;
-      font-size: 0.875rem;
-      cursor: pointer;
-    }
-
-    button {
-      padding: 0.3rem 0.75rem;
-      font-size: 0.8rem;
-      transition: background 0.15s;
-    }
-    button:hover { background: var(--border); }
-
-    #status {
-      font-size: 0.8rem;
-      color: var(--text-faint);
-      margin-left: auto;
-      white-space: nowrap;
+      border-radius: 8px;
       overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 280px;
+      transition: background 0.2s, border-color 0.2s;
     }
 
-    /* ── Controls row ──────────────────────────────────────────────────── */
-    .chart-controls {
+    /* ── Toolbar ─────────────────────────────────────────────────────────── */
+    .chart-toolbar {
       display: flex;
       align-items: center;
       gap: 0.75rem;
+      padding: 0 1rem;
+      height: 44px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
       font-size: 0.8rem;
       color: var(--text-muted);
-      flex-shrink: 0;
+      transition: border-color 0.2s;
     }
 
-    .chart-controls input[type="range"] {
-      width: 200px;
+    .chart-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .toolbar-sep {
+      width: 1px;
+      height: 1.25em;
+      background: var(--border);
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+
+    .toolbar-gap { flex: 1; min-width: 0.5rem; }
+
+    label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    select, button {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.8rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.2s, color 0.2s;
+    }
+    button:hover { background: var(--border); }
+
+    .chart-toolbar input[type="range"] {
+      width: 160px;
       accent-color: var(--accent);
       cursor: pointer;
     }
@@ -133,39 +138,60 @@
       min-width: 3ch;
     }
 
-    /* ── Chart ─────────────────────────────────────────────────────────── */
+    #window-range {
+      color: var(--accent);
+      font-size: 0.78em;
+      min-width: 10em;
+      display: inline-block;
+    }
+
+    #status {
+      font-size: 0.78rem;
+      color: var(--text-faint);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 220px;
+    }
+
+    /* ── Chart area ──────────────────────────────────────────────────────── */
     #chart-adaptive {
-      width: 100%;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      transition: background 0.2s, border-color 0.2s;
+      flex: 1;
+      min-height: 0;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Adaptive Piecewise Scale</h1>
-    <label for="dataset-selector">Dataset:</label>
-    <select id="dataset-selector">
-      <option value="usgs">USGS Earthquakes — magnitude / depth</option>
-      <option value="nyc" selected>NYC Property Sales — sale price / price per sq ft</option>
-      <option value="sba">SBA 7(a) Loans — loan amount / term</option>
-      <option value="forbes">Forbes Global 2000 — revenue / profit</option>
-      <option value="openalex">OpenAlex Citations — citation count / year</option>
-    </select>
-    <button id="theme-toggle">☀ Light</button>
-    <span id="status"></span>
-  </header>
+  <div class="chart-card">
+    <div class="chart-toolbar">
+      <span class="chart-title">Adaptive Piecewise Scale</span>
 
-  <div class="chart-controls">
-    <label for="alpha-slider">Window</label>
-    <input type="range" id="alpha-slider" min="0" max="1" step="any" value="0.5">
-    <span class="alpha-readout" id="alpha-value">0.50</span>
-    <span id="window-range" style="color:var(--accent);font-size:0.8em;min-width:10em;display:inline-block"></span>
+      <div class="toolbar-sep"></div>
+
+      <label for="dataset-selector">Dataset</label>
+      <select id="dataset-selector">
+        <option value="usgs">USGS Earthquakes — magnitude / depth</option>
+        <option value="nyc" selected>NYC Property Sales — sale price / price per sq ft</option>
+        <option value="sba">SBA 7(a) Loans — loan amount / term</option>
+        <option value="forbes">Forbes Global 2000 — revenue / profit</option>
+        <option value="openalex">OpenAlex Citations — citation count / year</option>
+      </select>
+
+      <div class="toolbar-sep"></div>
+
+      <label for="alpha-slider">Window</label>
+      <input type="range" id="alpha-slider" min="0" max="1" step="any" value="0.5">
+      <span class="alpha-readout" id="alpha-value">0.50</span>
+      <span id="window-range"></span>
+
+      <div class="toolbar-gap"></div>
+
+      <span id="status"></span>
+      <button id="theme-toggle">☀ Light</button>
+    </div>
+
+    <div id="chart-adaptive" class="chart-container"></div>
   </div>
-
-  <div id="chart-adaptive" class="chart-container" style="flex:1;min-height:0"></div>
 
   <script type="module" src="/src/index.js"></script>
 </body>
