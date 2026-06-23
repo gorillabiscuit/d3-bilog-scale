@@ -2,6 +2,7 @@ import { create, pointer, select } from 'd3-selection';
 import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { extent, bisectLeft } from 'd3-array';
+import { forceSimulation, forceCollide, forceY } from 'd3-force';
 import { makeFmt } from '../utils/format.js';
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
@@ -65,6 +66,7 @@ export function createChart(points, xScale, {
   rankNoun     = 'points', // plural noun for the tooltip's percentile line ("… of companies")
   dotRadius,               // undefined → auto-size by point count
   dotOpacity,              // undefined → auto-size by density
+  jitter       = false,    // y-only collision jitter — keeps x (the scale axis) exact
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
@@ -142,7 +144,7 @@ export function createChart(points, xScale, {
   const TT_LINE_H = 16, TT_PAD_X = 8;
 
   // ── Dots ─────────────────────────────────────────────────────────────────
-  g.append('g')
+  const circles = g.append('g')
     .attr('clip-path', `url(#${clipId})`)
     .selectAll('circle')
     .data(points)
@@ -151,8 +153,27 @@ export function createChart(points, xScale, {
       .attr('cx', d => xScale(d.x))
       .attr('cy', d => yScale(d.y))
       .attr('r', r)
-      .attr('fill-opacity', autoOpacity)
-    .on('pointerenter', function(event, d) {
+      .attr('fill-opacity', autoOpacity);
+
+  // Y-only jitter: x is frozen (the scale axis must stay exact); forceCollide
+  // pushes overlapping dots apart on y; forceY pulls them back toward their
+  // true position so the displacement stays honest (never more than ~1–2 radii).
+  if (jitter) {
+    const nodes = points.map(d => ({
+      fx: xScale(d.x),   // frozen — forceSimulation will never move x
+      x:  xScale(d.x),
+      y:  yScale(d.y),
+      cy0: yScale(d.y),  // true y, used by the restoring force
+    }));
+    forceSimulation(nodes)
+      .force('collide', forceCollide(r + 1).strength(0.8))
+      .force('y', forceY(d => d.cy0).strength(0.3))
+      .stop()
+      .tick(120);
+    circles.attr('cy', (_, i) => nodes[i].y);
+  }
+
+  circles.on('pointerenter', function(event, d) {
       select(this).raise()
         .attr('r', r + 2)
         .attr('fill-opacity', 1);

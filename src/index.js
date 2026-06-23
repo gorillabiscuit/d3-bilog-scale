@@ -79,7 +79,7 @@ function renderExperimental() {
         }
         renderExperimental();
       },
-      xLabel, yLabel, xFormat, yFormat, rankNoun: noun,
+      xLabel, yLabel, xFormat, yFormat, rankNoun: noun, jitter: true,
     })
   );
   // The chart reports its actual (capped) window via onWindowDrag during render, which drives
