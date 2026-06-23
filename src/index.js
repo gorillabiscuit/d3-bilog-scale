@@ -90,8 +90,13 @@ function renderExperimental(entranceAnimation = false) {
       renderExperimental();
     },
     xLabel, yLabel, xFormat, yFormat, rankNoun: noun,
-    jitter: entranceAnimation ? false : jitterEnabled,
+    // null  → skip simulation (jitter permanently off; setJitter will not be called)
+    // false → run simulation, start at true positions (entrance animation; setJitter(true) fires after first paint)
+    // true  → run simulation, start at spread positions
+    jitter: jitterEnabled ? (entranceAnimation ? false : true) : null,
   });
+  // Stop any pan auto-scroll timer from the previous chart before tearing it down.
+  chartNode?.stopPan?.();
   container.replaceChildren(el);
   chartNode = el;
 
@@ -130,7 +135,13 @@ alphaSlider.addEventListener('input', () => {
 
 jitterToggle.addEventListener('change', () => {
   jitterEnabled = jitterToggle.checked;
-  chartNode?.setJitter(jitterEnabled);
+  if (jitterEnabled) {
+    // Current chart was rendered with jitter:null (no simulation); need a full re-render
+    // so spread positions are computed. Entrance animation gives the spring effect.
+    renderExperimental(true);
+  } else {
+    chartNode?.setJitter(false);
+  }
 });
 
 themeToggle.addEventListener('click', () => {

@@ -157,57 +157,57 @@ export function createChart(points, xScale, {
       .attr('r', r)
       .attr('fill-opacity', autoOpacity);
 
-  // Always pre-compute separated positions so setJitter() can animate between them
-  // without a full re-render. x is frozen via fx; forceCollide separates overlapping
-  // dots on y; forceY pulls each dot back toward its true position — but yields more
-  // for locally-dense dots so crowded regions spread further apart.
+  // jitter: true  → run simulation, start at spread positions
+  // jitter: false → run simulation, start at true positions (entrance animation:
+  //                 caller will fire setJitter(true) after first paint)
+  // jitter: null  → skip simulation entirely; caller guarantees setJitter won't be called
   const jNodes = points.map(d => ({
-    fx:      xScale(d.x),
-    x:       xScale(d.x),
-    y:       yScale(d.y),   // mutated by simulation → separated position
-    cy0:     yScale(d.y),   // true position (restoring target + toggle reference)
-    density: 0,             // near-neighbours count, filled below
+    fx:  xScale(d.x),
+    x:   xScale(d.x),
+    y:   yScale(d.y),   // mutated by simulation → separated position; equals cy0 when skipped
+    cy0: yScale(d.y),   // true position (restoring target + toggle reference)
+    density: 0,
   }));
 
-  // Count near-neighbours for every node (O(n²), fast enough for ≤ 500 pts).
-  // A neighbour is any other dot whose true position is within 4 radii — close
-  // enough that both dots will compete for the same pixel space.
-  const nbThresh2 = (4 * (r + 1)) ** 2;
-  for (let i = 0; i < jNodes.length; i++) {
-    for (let j = i + 1; j < jNodes.length; j++) {
-      const dx = jNodes[j].x   - jNodes[i].x;
-      const dy = jNodes[j].cy0 - jNodes[i].cy0;
-      if (dx * dx + dy * dy < nbThresh2) {
-        jNodes[i].density++;
-        jNodes[j].density++;
+  if (jitter !== null) {
+    // Count near-neighbours (O(n²), fast enough for ≤ 500 pts). A neighbour is any dot
+    // whose true position is within 4 radii — close enough to compete for pixel space.
+    const nbThresh2 = (4 * (r + 1)) ** 2;
+    for (let i = 0; i < jNodes.length; i++) {
+      for (let j = i + 1; j < jNodes.length; j++) {
+        const dx = jNodes[j].x   - jNodes[i].x;
+        const dy = jNodes[j].cy0 - jNodes[i].cy0;
+        if (dx * dx + dy * dy < nbThresh2) {
+          jNodes[i].density++;
+          jNodes[j].density++;
+        }
       }
     }
-  }
-  const maxDensity = Math.max(1, ...jNodes.map(n => n.density));
+    const maxDensity = jNodes.reduce((m, n) => Math.max(m, n.density), 1);
 
-  // Wall force: pushes velocity away from the chart edges so no dot is ever
-  // pushed off-screen by collide. Constant strength (not alpha-scaled) so the
-  // wall stays hard even in the final settled ticks of the simulation.
-  const wallLo = r + 1, wallHi = innerH - r - 1;
-  function wallForce() {
-    for (const n of jNodes) {
-      if (n.y < wallLo) n.vy += (wallLo - n.y) * 0.4;
-      if (n.y > wallHi) n.vy -= (n.y - wallHi) * 0.4;
+    // Wall force: constant strength (not alpha-scaled) so the wall stays hard in
+    // the final settled ticks and no dot can be pushed off-screen by collide.
+    const wallLo = r + 1, wallHi = innerH - r - 1;
+    function wallForce() {
+      for (const node of jNodes) {
+        if (node.y < wallLo) node.vy += (wallLo - node.y) * 0.4;
+        if (node.y > wallHi) node.vy -= (node.y - wallHi) * 0.4;
+      }
     }
+
+    forceSimulation(jNodes)
+      .force('collide', forceCollide(r + 1).strength(0.8))
+      .force('y', forceY(d => d.cy0).strength(
+        // Isolated dots get a strong restoring force (barely move).
+        // Dense dots get a weak one so they can spread far enough to be visible.
+        d => Math.max(0.05, 0.35 - (d.density / maxDensity) * 0.30)
+      ))
+      .force('wall', wallForce)
+      .stop()
+      .tick(200);
   }
 
-  forceSimulation(jNodes)
-    .force('collide', forceCollide(r + 1).strength(0.8))
-    .force('y', forceY(d => d.cy0).strength(
-      // Isolated dots get a strong restoring force (barely move).
-      // Dense dots get a weak one so they can spread far enough to be visible.
-      d => Math.max(0.05, 0.35 - (d.density / maxDensity) * 0.30)
-    ))
-    .force('wall', wallForce)
-    .stop()
-    .tick(200);
-
-  circles.attr('cy', (_, i) => jitter ? jNodes[i].y : jNodes[i].cy0);
+  circles.attr('cy', (_, i) => jitter === true ? jNodes[i].y : jNodes[i].cy0);
 
   circles.on('pointerenter', function(event, d) {
       select(this).raise()

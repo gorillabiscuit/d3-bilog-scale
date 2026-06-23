@@ -20,7 +20,6 @@ export function createAdaptiveChart(points, {
   qHi: qHiOverride,    // explicit pixel fraction [0,1] for r2; undefined = use slider
   onWindowDrag,        // callback({ xLo, xHi }) fired on every drag move (lightweight)
   onWindowChange,      // callback({ xLo, xHi, qLo?, qHi? }) fired on dragend (triggers re-render)
-  tailTicks = 6,       // max ruler lines in each tail
   ...options
 } = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -32,7 +31,6 @@ export function createAdaptiveChart(points, {
     : renderPiecewise(points, {
         width, height, window, xFormat,
         xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
-        tailTicks,
         ...options,
       });
 }
@@ -53,7 +51,6 @@ const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 function renderPiecewise(points, {
   width, height, window, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
-  tailTicks,
   ...options
 }) {
   const innerW = width  - MARGIN.left - MARGIN.right;
@@ -145,15 +142,11 @@ function renderPiecewise(points, {
     setTimeout(() => panHintG.remove(), 800);
   }, 3000);
 
-  // Lift dots above the axes/gridlines drawn by createChart.
-  g.selectAll('circle').raise();
-
   // ── Region annotations ────────────────────────────────────────────────────
   // Permanent dimension-line annotations: one per scale region, always visible.
   // Shows the type label ("power" / "linear") above and the data range below.
   const ANNOT_Y   = 24;   // y of the dimension line
   const ANNOT_ARR = 5;    // arrowhead length in px
-  const annotFmt  = makeFmt(xFormat);
 
   function makeAnnotation(typeLabel) {
     const grp = g.append('g').attr('pointer-events', 'none');
@@ -182,7 +175,7 @@ function renderPiecewise(points, {
       grp.style('display', null);
       const cx = (p1 + p2) / 2;
       grp.select('.annot-type').attr('x', cx);
-      valueTxt.attr('x', cx).text(annotFmt(hi - lo));
+      valueTxt.attr('x', cx).text(xFmt(hi - lo));
       dimLine.attr('x1', p1 + ANNOT_ARR).attr('x2', p2 - ANNOT_ARR);
       arrL.attr('points', `${p1},${ANNOT_Y} ${p1+ANNOT_ARR},${ANNOT_Y-3} ${p1+ANNOT_ARR},${ANNOT_Y+3}`);
       arrR.attr('points', `${p2},${ANNOT_Y} ${p2-ANNOT_ARR},${ANNOT_Y-3} ${p2-ANNOT_ARR},${ANNOT_Y+3}`);
@@ -205,6 +198,10 @@ function renderPiecewise(points, {
   // posts at ~(tail width / RULER_MIN_PX), never thousands. Redrawn on every change.
   const leftRulerG  = g.append('g').attr('pointer-events', 'none');
   const rightRulerG = g.append('g').attr('pointer-events', 'none');
+
+  // Raise dots above all decoration groups (axes, rulers, annotations) so they
+  // paint on top and receive pointer events without the ruler rects dimming them.
+  g.selectAll('circle').raise();
 
   const RULER_HEAD   = 2.4;                // ~20% smaller heads → a couple more arrows fit
   const ARROW_MIN_PX = 2 * RULER_HEAD + 9; // ~14px: room for a ←→ arrow
@@ -245,7 +242,7 @@ function renderPiecewise(points, {
           // A tail narrower than one window-width can't be "×N window-widths" — show its
           // dollar span instead of a misleading ×0.x.
           const mult = beyond ? Math.abs(extreme - d0) / W : 1;
-          const val = mult >= 1 ? `×${fmtMult(mult)}` : annotFmt(Math.abs(extreme - d0));
+          const val = mult >= 1 ? `×${fmtMult(mult)}` : xFmt(Math.abs(extreme - d0));
           texts.push({ id: `lbl-t-${k}`, x: (a + b) / 2, y: 8, text: 'log', opacity: 0.3, italic: true, size: 9 });
           texts.push({ id: `lbl-v-${k}`, x: (a + b) / 2, y: ANNOT_Y - 2, text: val, opacity: 0.65, size: 10, weight: '500' });
         }
@@ -274,7 +271,7 @@ function renderPiecewise(points, {
         }
         arrows.push({ id: 'collapse-arrow', x1: a, x2: b, opacity: 0.65 });
         texts.push({ id: 'collapse-lbl-t', x: (a + b) / 2, y: 8, text: 'log', opacity: 0.3, italic: true, size: 9 });
-        texts.push({ id: 'collapse-lbl-v', x: (a + b) / 2, y: ANNOT_Y - 2, text: n >= 1 ? `×${fmtMult(n)}` : annotFmt(Math.abs(extreme - collapseAt)), opacity: 0.65, size: 10, weight: '500' });
+        texts.push({ id: 'collapse-lbl-v', x: (a + b) / 2, y: ANNOT_Y - 2, text: n >= 1 ? `×${fmtMult(n)}` : xFmt(Math.abs(extreme - collapseAt)), opacity: 0.65, size: 10, weight: '500' });
       }
     }
 
@@ -423,7 +420,8 @@ function renderPiecewise(points, {
         .attr('x', -pillW / 2).attr('y', pillY)
         .attr('width', pillW).attr('height', pillH)
         .attr('rx', pillW / 2)
-        .attr('fill-opacity', 0.22);
+        .attr('fill-opacity', 0.22)
+        .style('pointer-events', 'none');
 
       [-2, 2].forEach(cx =>
         [-5, 0, 5].forEach(dy =>
@@ -432,16 +430,17 @@ function renderPiecewise(points, {
             .attr('cx', cx).attr('cy', innerH / 2 + dy)
             .attr('r', 1)
             .attr('fill-opacity', 0.6)
+            .style('pointer-events', 'none')
         )
       );
 
-      handle.on('mouseenter focus', () => {
+      handle.on('pointerenter focus', () => {
         pill.attr('fill-opacity', 0.55);
-        handle.select('line').attr('stroke-opacity', 0.6);
+        handle.select('.handle-line').attr('stroke-opacity', 0.6);
       });
-      handle.on('mouseleave blur', () => {
+      handle.on('pointerleave blur', () => {
         pill.attr('fill-opacity', 0.22);
-        handle.select('line').attr('stroke-opacity', 0.3);
+        handle.select('.handle-line').attr('stroke-opacity', 0.3);
       });
 
       return handle;
@@ -580,6 +579,7 @@ function renderPiecewise(points, {
         if (dragMoved) onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
+    node.stopPan = () => { if (panTimer) { panTimer.stop(); panTimer = null; } };
   }
 
   return node;
