@@ -90,3 +90,4 @@ Decision log for the article. Timestamped one-liners only.
 - **[13:36]** Renamed 'Jitter' to 'Spread' — force-directed separation is not random noise
 - **[13:36]** Density-adaptive restoring force: per-node neighbour count (within 4r) drives forceY.strength; crowded dots get strength→0.05, isolated dots stay at 0.35 — USGS shallow cluster separates visibly
 - **[13:36]** Generation counter in renderExperimental prevents stale entrance animations from a prior dataset load firing on the new chart
+- **[13:47]** Added wall force to jitter simulation — constant-strength boundary force prevents dots from escaping chart edges on spread

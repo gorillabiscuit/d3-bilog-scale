@@ -185,6 +185,17 @@ export function createChart(points, xScale, {
   }
   const maxDensity = Math.max(1, ...jNodes.map(n => n.density));
 
+  // Wall force: pushes velocity away from the chart edges so no dot is ever
+  // pushed off-screen by collide. Constant strength (not alpha-scaled) so the
+  // wall stays hard even in the final settled ticks of the simulation.
+  const wallLo = r + 1, wallHi = innerH - r - 1;
+  function wallForce() {
+    for (const n of jNodes) {
+      if (n.y < wallLo) n.vy += (wallLo - n.y) * 0.4;
+      if (n.y > wallHi) n.vy -= (n.y - wallHi) * 0.4;
+    }
+  }
+
   forceSimulation(jNodes)
     .force('collide', forceCollide(r + 1).strength(0.8))
     .force('y', forceY(d => d.cy0).strength(
@@ -192,6 +203,7 @@ export function createChart(points, xScale, {
       // Dense dots get a weak one so they can spread far enough to be visible.
       d => Math.max(0.05, 0.35 - (d.density / maxDensity) * 0.30)
     ))
+    .force('wall', wallForce)
     .stop()
     .tick(200);
 
