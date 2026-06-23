@@ -30,33 +30,29 @@ const BIMODAL = make([
 ]);
 
 const SLIDERS = [0, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0];
-const METHODS = { windowQuantile };
 
 // ── Core invariant: xLo < xHi for slider > 0; xLo <= xHi for slider = 0 ──────
 // slider=0 is legitimately degenerate (window collapses to a single point —
 // the median / density peak / cluster centre). renderPiecewise falls back to
 // renderLog in that case. All other slider values must produce a strict window.
 
-for (const [methodName, method] of Object.entries(METHODS)) {
-  describe(`${methodName} — xLo ≤ xHi invariant`, () => {
-    for (const [dataName, data] of Object.entries({ NARROW, WIDE, BIMODAL })) {
-      const values = data.map(d => d.x);
-      for (const slider of SLIDERS) {
-        it(`${dataName} slider=${slider}`, () => {
-          const { xLo, xHi } = method(values, slider);
-          if (slider === 0) {
-            expect(xLo).toBeLessThanOrEqual(xHi);
-          } else {
-            expect(xLo).toBeLessThan(xHi);
-          }
-        });
-      }
+describe('windowQuantile — xLo ≤ xHi invariant', () => {
+  for (const [dataName, data] of Object.entries({ NARROW, WIDE, BIMODAL })) {
+    const values = data.map(d => d.x);
+    for (const slider of SLIDERS) {
+      it(`${dataName} slider=${slider}`, () => {
+        const { xLo, xHi } = windowQuantile(values, slider);
+        if (slider === 0) {
+          expect(xLo).toBeLessThanOrEqual(xHi);
+        } else {
+          expect(xLo).toBeLessThan(xHi);
+        }
+      });
     }
-  });
-}
+  }
+});
 
 // ── Monotonicity: wider slider → wider or equal window ───────────────────────
-// (only reliable for quantile; kde/mixture are density-based so we skip them)
 
 describe('windowQuantile — wider slider → wider window', () => {
   for (const [dataName, data] of Object.entries({ NARROW, WIDE, BIMODAL })) {
@@ -73,41 +69,31 @@ describe('windowQuantile — wider slider → wider window', () => {
 });
 
 // ── Bounds: window must stay within the data range ───────────────────────────
-// Quantile is always bounded by definition.
-// KDE and Mixture are now clamped to [xMin, xMax] in their implementations.
 
-for (const [methodName, method] of Object.entries(METHODS)) {
-  describe(`${methodName} — window within data range`, () => {
-    for (const [dataName, data] of Object.entries({ NARROW, WIDE, BIMODAL })) {
-      const values = data.map(d => d.x);
-      const xMin = Math.min(...values);
-      const xMax = Math.max(...values);
-      it(dataName, () => {
-        for (const slider of SLIDERS) {
-          const { xLo, xHi } = method(values, slider);
-          expect(xLo).toBeGreaterThanOrEqual(xMin - 1e-9);
-          expect(xHi).toBeLessThanOrEqual(xMax + 1e-9);
-        }
-      });
-    }
-  });
-}
+describe('windowQuantile — window within data range', () => {
+  for (const [dataName, data] of Object.entries({ NARROW, WIDE, BIMODAL })) {
+    const values = data.map(d => d.x);
+    const xMin = Math.min(...values);
+    const xMax = Math.max(...values);
+    it(dataName, () => {
+      for (const slider of SLIDERS) {
+        const { xLo, xHi } = windowQuantile(values, slider);
+        expect(xLo).toBeGreaterThanOrEqual(xMin - 1e-9);
+        expect(xHi).toBeLessThanOrEqual(xMax + 1e-9);
+      }
+    });
+  }
+});
 
 // ── Edge cases ────────────────────────────────────────────────────────────────
 
 describe('edge cases', () => {
   it('single unique value does not crash', () => {
-    const values = [42, 42, 42, 42];
-    for (const method of Object.values(METHODS)) {
-      expect(() => method(values, 0.5)).not.toThrow();
-    }
+    expect(() => windowQuantile([42, 42, 42, 42], 0.5)).not.toThrow();
   });
 
   it('two values does not crash', () => {
-    const values = [1, 1000000];
-    for (const method of Object.values(METHODS)) {
-      expect(() => method(values, 0.5)).not.toThrow();
-    }
+    expect(() => windowQuantile([1, 1000000], 0.5)).not.toThrow();
   });
 
   it('extreme range 1 to 250M (USGS shape) — quantile always valid', () => {

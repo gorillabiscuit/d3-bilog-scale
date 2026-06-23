@@ -28,15 +28,11 @@ async function load(datasetKey) {
     status.textContent = `${currentDataset.points.length} points — ${currentDataset.description}`;
     manualXLo = null; manualXHi = null;
     manualQLo = null; manualQHi = null;
-    renderCharts();
+    renderExperimental();
   } catch (err) {
     status.textContent = `Failed to load: ${err.message}`;
     console.error(err);
   }
-}
-
-function renderCharts() {
-  renderExperimental();
 }
 
 // ── Range display ─────────────────────────────────────────────────────────────
@@ -134,7 +130,7 @@ document.getElementById('chart-adaptive').addEventListener('dblclick', () => {
 let _resizeTimer;
 const ro = new ResizeObserver(() => {
   clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(renderCharts, 120);
+  _resizeTimer = setTimeout(renderExperimental, 120);
 });
 document.querySelectorAll('.chart-container').forEach(el => ro.observe(el));
 

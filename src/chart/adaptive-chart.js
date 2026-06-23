@@ -7,7 +7,6 @@ import { timer } from 'd3-timer';
 import { createChart, MARGIN } from './base-chart.js';
 import { makeFmt, fmtMult } from '../utils/format.js';
 import { detectScaleType } from '../scale/detect.js';
-import { windowQuantile } from '../scale/window.js';
 import { scaleAdaptive } from '../scale/adaptive-scale.js';
 
 export function createAdaptiveChart(points, {
