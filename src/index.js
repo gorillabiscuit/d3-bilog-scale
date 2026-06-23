@@ -26,15 +26,19 @@ let chartNode = null;  // current SVG element — setJitter() animates it in pla
 
 async function load(datasetKey) {
   status.textContent = 'Loading…';
+  const container = document.getElementById('chart-adaptive');
+  container.setAttribute('data-loading', '');
   try {
     currentDataset = await LOADERS[datasetKey]();
     status.textContent = `${currentDataset.points.length} points — ${currentDataset.description}`;
     manualXLo = null; manualXHi = null;
     manualQLo = null; manualQHi = null;
-    renderExperimental();
+    renderExperimental(true);
   } catch (err) {
     status.textContent = `Failed to load: ${err.message}`;
     console.error(err);
+  } finally {
+    container.removeAttribute('data-loading');
   }
 }
 
@@ -49,7 +53,10 @@ function updateRangeDisplay(xLo, xHi, xFormat) {
 
 // ── Chart render ──────────────────────────────────────────────────────────────
 
-function renderExperimental() {
+// entranceAnimation=true: dots render at true positions then spring to jittered
+// after first paint — used on new data loads. false: render at correct jitter
+// state instantly — used on re-renders from slider/drag so there's no lag.
+function renderExperimental(entranceAnimation = false) {
   if (!currentDataset) return;
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s', noun = 'points' } = currentDataset;
   const slider = +alphaSlider.value;
@@ -81,12 +88,19 @@ function renderExperimental() {
       }
       renderExperimental();
     },
-    xLabel, yLabel, xFormat, yFormat, rankNoun: noun, jitter: jitterEnabled,
+    xLabel, yLabel, xFormat, yFormat, rankNoun: noun,
+    jitter: entranceAnimation ? false : jitterEnabled,
   });
   container.replaceChildren(el);
   chartNode = el;
-  // The chart reports its actual (capped) window via onWindowDrag during render, which drives
-  // the range readout — so it always matches what's drawn rather than the raw slider quantiles.
+
+  if (jitterEnabled && entranceAnimation) {
+    // Two RAF calls: first frame paints the initial (true) positions,
+    // second triggers the spring so the user sees dots settle in.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      chartNode?.setJitter(true, 700);
+    }));
+  }
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
@@ -110,9 +124,8 @@ alphaSlider.addEventListener('input', () => {
   _raf = requestAnimationFrame(() => { renderExperimental(); _raf = null; });
 });
 
-jitterToggle.addEventListener('click', () => {
-  jitterEnabled = !jitterEnabled;
-  jitterToggle.classList.toggle('is-active', jitterEnabled);
+jitterToggle.addEventListener('change', () => {
+  jitterEnabled = jitterToggle.checked;
   chartNode?.setJitter(jitterEnabled);
 });
 
