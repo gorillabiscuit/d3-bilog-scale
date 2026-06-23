@@ -20,7 +20,8 @@ let manualQLo = null, manualQHi = null;
 
 let currentTheme = 'dark';
 let jitterEnabled = true;
-let chartNode = null;  // current SVG element — setJitter() animates it in place
+let chartNode = null;       // current SVG element — setJitter() animates it in place
+let _spreadGeneration = 0; // increments on every render; RAF checks it to avoid stale animations
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -95,10 +96,13 @@ function renderExperimental(entranceAnimation = false) {
   chartNode = el;
 
   if (jitterEnabled && entranceAnimation) {
-    // Two RAF calls: first frame paints the initial (true) positions,
-    // second triggers the spring so the user sees dots settle in.
+    // Two RAF calls: first frame paints the initial (true) positions, second
+    // triggers the spring so the user sees dots settle in.
+    // Generation guard: if another render fires before these RAFs execute
+    // (e.g. rapid dataset switching), only the latest render should animate.
+    const gen = ++_spreadGeneration;
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      chartNode?.setJitter(true, 700);
+      if (_spreadGeneration === gen) chartNode?.setJitter(true, 700);
     }));
   }
 }

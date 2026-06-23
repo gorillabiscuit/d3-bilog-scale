@@ -87,3 +87,6 @@ Decision log for the article. Timestamped one-liners only.
 - **[10:51]** Added y-only forceSimulation jitter to base-chart.js: fx freezes x (scale axis exact), forceCollide(r+1) separates overlapping dots, forceY restores to true position — displacement stays ≤ 1-2 radii so the jitter is honest
 - **[11:19]** Added jitter toggle button to toolbar: in-place animation via setJitter() method attached to SVG node — easeBackOut on spread (springy), easeCubicInOut on collapse; no full re-render on toggle
 - **[13:29]** Replaced jitter button with real CSS toggle switch; added entrance animation (dots settle from true positions on data load); added loading spinner via ::after on chart container
+- **[13:36]** Renamed 'Jitter' to 'Spread' — force-directed separation is not random noise
+- **[13:36]** Density-adaptive restoring force: per-node neighbour count (within 4r) drives forceY.strength; crowded dots get strength→0.05, isolated dots stay at 0.35 — USGS shallow cluster separates visibly
+- **[13:36]** Generation counter in renderExperimental prevents stale entrance animations from a prior dataset load firing on the new chart
