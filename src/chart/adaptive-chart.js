@@ -384,18 +384,17 @@ function renderPiecewise(points, {
       onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi });
     }
 
-    // The boundary domain is read from the scale's fixed-density tail mapping at the handle's pixel
-    // (not invert, which follows the symlog tail shape and would drift from where the scale then
-    // draws the boundary). This keeps the handle exactly under the cursor and lets a tail collapse
-    // smoothly to zero as the boundary reaches the chart edge.
+    // The boundary in dollars is read straight off the scale's own invert at the handle's
+    // pixel — pure math layer, smooth and monotonic. The window can't run away to a flattened
+    // view because scaleAdaptive caps it to the non-outlier range; the chart just renders that.
     function applyLeftDrag(px) {
-      const newXLo = Math.max(xMin + eps, Math.min(currentXHi - eps, xScale.tailDomainAtPixel(px, 'left')));
+      const newXLo = Math.max(xMin + eps, xScale.invert(px));
       applyState(newXLo, currentXHi, px, currentR2);
       return newXLo;
     }
 
     function applyRightDrag(px) {
-      const newXHi = Math.min(xMax - eps, Math.max(currentXLo + eps, xScale.tailDomainAtPixel(px, 'right')));
+      const newXHi = Math.min(xMax - eps, xScale.invert(px));
       applyState(currentXLo, newXHi, currentR1, px);
       return newXHi;
     }
@@ -460,28 +459,58 @@ function renderPiecewise(points, {
     // Set on the first move of any drag; a drag that never moves is a click (see end handlers).
     let dragMoved = false;
 
-    // Pan: the linear window translates rigidly in PIXEL space (so it glides linearly with the
-    // pointer) and the domain follows through the scale's fixed-density tail mapping — the same one
-    // the handles use. Because that mapping and its inverse cancel, the box width is preserved
-    // exactly, and as the box reaches a chart edge the tail on that side collapses to zero decades:
-    // the window lands on the extreme with no snap and no padding. No auto-scroll timer is needed —
-    // the box docking at the edge already means the domain has reached xMin / xMax.
-    let panStartX = 0, panStartR1 = r1, panBoxW = r2 - r1, panPointerX = 0;
+    // Pan: the box translates rigidly in pixel space; the domain follows at a uniform
+    // dollar-per-pixel rate. When the pointer pushes past a chart edge the box docks and
+    // the window AUTO-SCROLLS through the data on a d3.timer, so it keeps going while the
+    // pointer is held — speed scaling with how far past the edge the pointer is. The
+    // accumulated scroll is folded into the domain so dragging back is seamless.
+    const AUTO_GAIN = 0.12;          // overshoot px → fraction of a pan-step per ~frame
+    const AUTO_MAX_OVERSHOOT = 120;  // cap so it can't scroll absurdly fast
+    // The window must stay within the scale's cap, not the raw data extremes — otherwise
+    // panning past the cap pushes both edges onto the bound and collapses the window.
+    const [panLo, panHi] = xScale.windowBounds();
+    let panStartX = 0, panStartR1 = r1, panStartXLo = xLo, panStartXHi = xHi;
+    let panBoxW = r2 - r1, panRate = (xHi - xLo) / panBoxW;
+    let panPointerX = 0, panAutoAccum = 0, panPrevElapsed = 0, panTimer = null;
+
+    const panOvershoot = () => {              // signed px the desired box sits past an edge
+      const desiredR1 = panStartR1 + (panPointerX - panStartX);
+      if (desiredR1 > r3 - panBoxW) return Math.min(desiredR1 - (r3 - panBoxW), AUTO_MAX_OVERSHOOT);
+      if (desiredR1 < r0)          return Math.max(desiredR1 - r0, -AUTO_MAX_OVERSHOOT);
+      return 0;
+    };
     function panApply() {
-      const newR1 = Math.max(r0, Math.min(r3 - panBoxW, panStartR1 + (panPointerX - panStartX)));
-      const newR2 = newR1 + panBoxW;
-      applyState(xScale.tailDomainAtPixel(newR1, 'left'), xScale.tailDomainAtPixel(newR2, 'right'), newR1, newR2);
+      const delta   = panPointerX - panStartX;
+      const newR1   = Math.max(r0, Math.min(r3 - panBoxW, panStartR1 + delta)); // box docks at edge
+      const newR2   = newR1 + panBoxW;
+      const boundedDelta = newR1 - panStartR1;                                  // pointer pan, capped at the dock
+      let newXLo = panStartXLo + boundedDelta * panRate + panAutoAccum;
+      let newXHi = panStartXHi + boundedDelta * panRate + panAutoAccum;
+      if (newXLo < panLo) { newXHi -= (newXLo - panLo); newXLo = panLo; }
+      if (newXHi > panHi) { newXLo -= (newXHi - panHi); newXHi = panHi; }
+      applyState(newXLo, newXHi, newR1, newR2);
     }
 
     overlay.call(drag()
       .on('start', event => {
         dragMoved = false;
         panStartX = event.x; panPointerX = event.x;
-        panStartR1 = currentR1; panBoxW = currentR2 - currentR1;
+        panStartR1 = currentR1; panStartXLo = currentXLo; panStartXHi = currentXHi;
+        panBoxW = currentR2 - currentR1; panRate = (currentXHi - currentXLo) / panBoxW;
+        panAutoAccum = 0; panPrevElapsed = 0;
         overlay.style('cursor', 'grabbing');
+        panTimer = timer(elapsed => {
+          const dt = Math.min(elapsed - panPrevElapsed, 50); panPrevElapsed = elapsed;
+          const over = panOvershoot();
+          // Only keep scrolling while there's data left to reveal in that direction.
+          const canScroll = over > 0 ? currentXHi < panHi - eps * 2
+                          : over < 0 ? currentXLo > panLo + eps * 2 : false;
+          if (canScroll) { dragMoved = true; panAutoAccum += over * panRate * AUTO_GAIN * (dt / 16); panApply(); }
+        });
       })
       .on('drag', event => { dragMoved = true; panPointerX = event.x; panApply(); })
       .on('end', () => {
+        if (panTimer) { panTimer.stop(); panTimer = null; }
         overlay.style('cursor', null);
         // A pure click (no movement) must not re-render: it would replace the SVG between
         // the two clicks of a double-click and swallow the reset gesture.
@@ -539,11 +568,16 @@ function renderPiecewise(points, {
       const dir   = event.key === 'ArrowRight' ? 1 : -1;
       const boxW  = currentR2 - currentR1;
       const step  = kbStep(event);
-      // Same pixel-rigid translation as the mouse pan: shift the box and read the domain back through
-      // the fixed-density mapping, so arrow-key panning glides into the extreme with its width intact.
+      const panRate = (currentXHi - currentXLo) / boxW;
       const newR1 = Math.max(r0, Math.min(r3 - boxW, currentR1 + dir * step));
       const newR2 = newR1 + boxW;
-      applyState(xScale.tailDomainAtPixel(newR1, 'left'), xScale.tailDomainAtPixel(newR2, 'right'), newR1, newR2);
+      // Same cap handling as the mouse pan: clamp to the window bounds and shift as a unit so
+      // arrow-key panning parks at the cap with its width intact, instead of drifting past it.
+      let newXLo = currentXLo + dir * step * panRate;
+      let newXHi = currentXHi + dir * step * panRate;
+      if (newXLo < panLo) { newXHi -= (newXLo - panLo); newXLo = panLo; }
+      if (newXHi > panHi) { newXLo -= (newXHi - panHi); newXHi = panHi; }
+      applyState(newXLo, newXHi, newR1, newR2);
       onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       scheduleCommit();
     });
@@ -574,6 +608,7 @@ function renderPiecewise(points, {
       })
     );
     node.stopPan = () => {
+      if (panTimer) { panTimer.stop(); panTimer = null; }
       if (kbCommit) { clearTimeout(kbCommit); kbCommit = null; }
     };
 

@@ -3,8 +3,6 @@ import { min, max } from 'd3-array';
 import { windowQuantile } from './window.js';
 import { detectBreakpoints } from './breakpoints.js';
 
-const MIN_LINEAR_PX = 20; // smallest pixel width the linear region may shrink to under fixed-density tails
-
 export function solveSymlogConstant(A, S, T) {
   if (!(S > 0) || !(A > 0) || !(T > 0)) return 1;
   if (T <= A / S) return S; // window shallower than the tail average → near-linear tail
@@ -54,44 +52,21 @@ export function scaleAdaptive() {
   let hasLeft = false, hasRight = false;
   let tickPool = [];
 
-  // The outer bound the interaction code (pan, handle drag) clamps to: the full data extent. A
-  // dragged window CAN reach an extreme — the tail it leaves behind collapses smoothly to zero
-  // pixels (fixed-density tails, see below), so reaching the edge needs no padding and produces no
-  // snap. Exposed via scale.windowBounds().
+  // The outer bound on the linear window — applied to BOTH the auto/default placement and to
+  // interaction (pan, handle drag). On multi-decade positive data it sits 2% of the log span in
+  // from each extreme, so the window always leaves a thin log-tail on each side and can never
+  // flatten the cluster: because the window can never reach an extreme, a tail can never vanish, so
+  // the tail-collapse "snap" is structurally impossible. The buffer is kept small (2%) so the
+  // window can pan almost to the edge — the residual padding is barely visible. Compact or
+  // zero-crossing data returns the full domain, so the scale still degrades cleanly to linear.
+  // Exposed via scale.windowBounds() so interaction code clamps to it.
   function windowCap() {
-    return [_domain[0], _domain[1]];
-  }
-
-  // The bound for the AUTO (default / slider-driven) window only. On multi-decade positive data it
-  // insets 5% of the log span from each end so the default view always loads with a tail on each
-  // side and never flattens the cluster. NOT applied to interaction — a deliberate drag may reach an
-  // extreme and collapse that tail. Compact or zero-crossing data returns the full extent.
-  function autoWindowBounds() {
     const [xMin, xMax] = _domain;
     if (xMin > 0 && Math.log10(xMax / xMin) > 1.5) {
-      const tf = Math.pow(xMax / xMin, 0.05);
+      const tf = Math.pow(xMax / xMin, 0.02);
       return [xMin * tf, xMax / tf];
     }
     return [xMin, xMax];
-  }
-
-  // Tail density in pixels-per-decade, pinned to the auto window's pixel split so a dragged window
-  // collapses its tails at the same rate the default view shows them (no jump on grab). The pan and
-  // handle drag share this single source of truth, so the boundary the scale renders and the domain
-  // the handle reads back stay consistent.
-  function tailDensity() {
-    const [xMin, xMax] = _domain;
-    const [rMin, rMax] = _range;
-    const totalPixels = rMax - rMin;
-    const { xLo: autoLo, xHi: autoHi } = windowQuantile(_data, _window);
-    const qLoAuto = Math.max(0, 0.5 - _window / 2);
-    const qHiAuto = Math.min(1, 0.5 + _window / 2);
-    const autoLeftDec  = (xMin > 0 && autoLo > xMin) ? Math.log10(autoLo / xMin) : 0;
-    const autoRightDec = (xMax > 0 && autoHi < xMax) ? Math.log10(xMax / autoHi) : 0;
-    return {
-      kL: autoLeftDec  > 0 ? (totalPixels * qLoAuto)       / autoLeftDec  : 0,
-      kR: autoRightDec > 0 ? (totalPixels * (1 - qHiAuto)) / autoRightDec : 0,
-    };
   }
 
   function rebuild() {
@@ -136,9 +111,9 @@ export function scaleAdaptive() {
 
     // Cap the window into [floor, ceil] by shifting it as a UNIT (preserving width). Clamping
     // the two edges independently would collapse a window panned entirely past a bound to zero
-    // width — the cause of the "$73.4M – $73.4M, linear $0" bug. The auto window insets (keeps a
-    // tail on each side); a dragged window may reach the full extent and collapse a tail smoothly.
-    const [floor, ceil] = isOverride ? windowCap() : autoWindowBounds();
+    // width — the cause of the "$73.4M – $73.4M, linear $0" bug. The cap applies to dragged and
+    // auto windows alike, so neither can spread far enough to flatten the cluster / vanish a tail.
+    const [floor, ceil] = windowCap();
     const width = Math.max(0, hi - lo);
     if (hi > ceil)  { hi = ceil;  lo = ceil - width; }
     if (lo < floor) { lo = floor; hi = Math.min(ceil, floor + width); }
@@ -171,26 +146,12 @@ export function scaleAdaptive() {
     // Determine range boundaries (r1, r2)
     let p1, p2;
     if (_r1Override != null && _r2Override != null) {
-      // Fixed-density log tails. Each tail gets a CONSTANT pixels-per-decade, so its width is purely
-      // a function of how many decades it currently spans. As a pan or handle drag shrinks a tail's
-      // decade-span toward zero, its pixels shrink to zero smoothly — the window reaches the extreme
-      // with no snap and no leftover padding. Because p1 = rMin + density·log10(xLo/xMin) is exactly
-      // the tail sub-scale's own mapping, invert(p1) === currentXLo holds, so a handle drag (which
-      // sets xLo = invert(cursor)) lands the boundary precisely under the cursor. The density is
-      // pinned to the auto window's allocation so grabbing the default view never jumps.
-      const { kL, kR } = tailDensity();
-      p1 = hasLeft  && kL > 0 ? rMin + kL * Math.log10(currentXLo / xMin) : rMin;
-      p2 = hasRight && kR > 0 ? rMax - kR * Math.log10(xMax / currentXHi) : rMax;
-      // Both tails can grow at once (a narrow window in the middle); keep a minimum linear region
-      // and rescale the two tails proportionally if together they would invert it.
-      const minLin = Math.min(MIN_LINEAR_PX, totalPixels);
-      if (p2 - p1 < minLin) {
-        const avail = Math.max(0, totalPixels - minLin);
-        const want  = (p1 - rMin) + (rMax - p2);
-        const s = want > 0 ? avail / want : 0;
-        p1 = rMin + (p1 - rMin) * s;
-        p2 = rMax - (rMax - p2) * s;
-      }
+      // An absent tail gets no pixels even under an explicit override, so the linear region
+      // extends to the chart edge instead of leaving a degenerate strip behind. The boundary
+      // renders exactly at the override pixel so invert(p1) === currentXLo holds — interaction
+      // code (handle drag) sets xLo = invert(cursor) and relies on that round-trip.
+      p1 = hasLeft ? _r1Override : rMin;
+      p2 = hasRight ? _r2Override : rMax;
     } else {
       const qLo = hasLeft ? Math.max(0, 0.5 - _window / 2) : 0;
       const qHi = hasRight ? Math.min(1, 0.5 + _window / 2) : 1;
@@ -200,19 +161,31 @@ export function scaleAdaptive() {
       p2 = rMax - wR;
     }
 
-    // For the AUTO window only, reserve a minimum sliver for any present tail so outliers always
-    // keep a few pixels even at the widest slider setting. Fit the linear region INTO the post-reserve
-    // band so the two reserves can't cross and invert the region (p1 > p2) on wide charts. The
-    // override (pan/handle) path needs no reserve: its fixed-density tails are meant to shrink to
-    // zero as the window reaches an extreme — that's the smooth collapse, not a degenerate strip.
-    if (!isOverride) {
-      const minTail = totalPixels * 0.02;
-      const loBound = hasLeft  ? rMin + minTail : rMin;
-      const hiBound = hasRight ? rMax - minTail : rMax;
-      const linW = Math.min(p2 - p1, hiBound - loBound);
-      p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
-      p2 = p1 + linW;
-    }
+    // Reserve a minimum pixel sliver for any tail that exists, so a present tail is never squeezed
+    // to a zero-width "log ×0.0" strip. Fit the linear region INTO the post-reserve band, preserving
+    // its pixel width where it fits and shifting it inward to make room — reserving each edge
+    // independently would let the two reserves cross and invert the region (p1 > p2), breaking
+    // monotonicity on charts wider than ~1000px. This applies to dragged (override) and auto windows
+    // alike: special-casing the drag path to collapse the tail to the extreme made panning teleport
+    // to the edge the moment a tail shrank past minTail — the reported "jumps straight to the side"
+    // bug. As a tail genuinely disappears, the ratio/linear test above flips hasLeft/hasRight false
+    // and the linear region gets the full span, so panning to an edge stays smooth.
+    const minTail = totalPixels * 0.02;
+    // Taper the reserved sliver to zero as a tail nears vanishing, so panning to an extreme glides
+    // to the edge instead of holding at the reserve and then releasing all of it in one jump when
+    // the existence test flips — the "snap at the edge" the reserve otherwise causes. The ramp is
+    // keyed to the same ratio hasLeft/hasRight use and hits zero exactly at TAIL_RATIO, so the
+    // reserve and the flip coincide and the transition is continuous. Far from an edge (default and
+    // auto views, where the ratio is large) the reserve is full, so outliers keep guaranteed pixels.
+    const RAMP_RATIO = 2.0; // a tail >=2x from the extreme gets the full reserve; below that it tapers
+    const taper = ratio => Math.max(0, Math.min(1, (ratio - TAIL_RATIO) / (RAMP_RATIO - TAIL_RATIO)));
+    const leftReserve  = hasLeft  ? minTail * (xMin > 0 ? taper(currentXLo / xMin) : 1) : 0;
+    const rightReserve = hasRight ? minTail * (xMax > 0 ? taper(xMax / currentXHi) : 1) : 0;
+    const loBound = rMin + leftReserve;
+    const hiBound = rMax - rightReserve;
+    const linW = Math.min(p2 - p1, hiBound - loBound);
+    p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
+    p2 = p1 + linW;
 
     currentR1 = p1;
     currentR2 = p2;
@@ -383,18 +356,6 @@ export function scaleAdaptive() {
   // [floor, ceil] the linear window is allowed to occupy — interaction code clamps to this so
   // panning/dragging can't push the window past the cap (where it would otherwise collapse).
   scale.windowBounds = windowCap;
-
-  // The domain whose tail boundary the fixed-density layout renders at pixel `px`. Handle drags use
-  // this (not invert) so the boundary lands exactly under the cursor and stays consistent with where
-  // the scale will then draw it — invert follows the symlog tail shape, which would drift from the
-  // log-density boundary and make the handle feel loose. side: 'left' (xLo) or 'right' (xHi).
-  scale.tailDomainAtPixel = function (px, side) {
-    const [xMin, xMax] = _domain;
-    const [rMin, rMax] = _range;
-    const { kL, kR } = tailDensity();
-    if (side === 'left')  return kL > 0 ? xMin * Math.pow(10, (px - rMin) / kL) : xMin;
-    return kR > 0 ? xMax / Math.pow(10, (rMax - px) / kR) : xMax;
-  };
 
   scale.type = 'adaptive';
 

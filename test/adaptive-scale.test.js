@@ -152,12 +152,14 @@ describe('window cap and pixel reserve', () => {
     expect(hi).toBeLessThanOrEqual(ceil + 1e-6);
   });
 
-  test('windowBounds() exposes the full data extent so interaction can reach the edges', () => {
-    // A dragged window may reach an extreme; its tail collapses smoothly to zero (fixed-density),
-    // so windowBounds is the full domain (no padding) for any data.
+  test('windowBounds() insets multi-decade data so interaction can never flatten a tail', () => {
     const wide = scaleAdaptive().data(bothTails).range([0, 800]);
-    expect(wide.windowBounds()).toEqual(wide.domain());
+    const [xMin, xMax] = wide.domain();
+    const [lo, hi] = wide.windowBounds();
+    expect(lo).toBeGreaterThan(xMin);   // cap sits inside the extremes...
+    expect(hi).toBeLessThan(xMax);      // ...so the window can never reach an edge and vanish a tail
 
+    // Compact (non-multi-decade) data has no tails to protect, so the cap is the full domain.
     const compact = scaleAdaptive().data(cluster).range([0, 800]);
     expect(compact.windowBounds()).toEqual(compact.domain());
   });
