@@ -69,6 +69,7 @@ export function createChart(points, xScale, {
   dotRadius,               // undefined → auto-size by point count
   dotOpacity,              // undefined → auto-size by density
   jitter       = false,    // y-only collision jitter — keeps x (the scale axis) exact
+  yTicks       = 5,        // number of y-axis ticks; reduce for discrete datasets (e.g. year)
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
   const innerW = width  - mLeft - mRight;
@@ -119,7 +120,7 @@ export function createChart(points, xScale, {
   // ── y-axis ───────────────────────────────────────────────────────────────
   g.append('g')
     .attr('class', 'y-axis')
-    .call(axisLeft(yScale).ticks(5).tickFormat(yFmt));
+    .call(axisLeft(yScale).ticks(yTicks).tickFormat(yFmt));
 
   // ── SVG-internal tooltip ─────────────────────────────────────────────────
   const tt = g.append('g')

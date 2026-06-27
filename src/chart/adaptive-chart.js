@@ -4,6 +4,7 @@ import { select } from 'd3-selection';
 import { drag } from 'd3-drag';
 import { axisBottom } from 'd3-axis';
 import { timer } from 'd3-timer';
+import { easeCubicInOut } from 'd3-ease';
 import { createChart, MARGIN } from './base-chart.js';
 import { makeFmt, fmtMult } from '../utils/format.js';
 import { detectScaleType } from '../scale/detect.js';
@@ -95,6 +96,7 @@ function renderPiecewise(points, {
   // events for tooltips. Drag is attached here so clicks on empty space in the
   // linear region trigger the pan while clicks on dots reach the dot handlers.
   const overlay = g.append('rect')
+      .attr('class', 'pan-overlay')
       .attr('x', r1).attr('width', Math.max(0, r2 - r1))
       .attr('y', 0).attr('height', innerH)
       .attr('fill', 'transparent')
@@ -274,6 +276,12 @@ function renderPiecewise(points, {
         texts.push({ id: 'collapse-lbl-v', x: (a + b) / 2, y: ANNOT_Y - 2, text: n >= 1 ? `×${fmtMult(n)}` : xFmt(Math.abs(extreme - collapseAt)), opacity: 0.65, size: 10, weight: '500' });
       }
     }
+
+    // Close the tail with a post at the extreme edge — the same vertical line the chart's start
+    // edge gets. The chunk/dense loops step by RULER_MIN_PX and, under compression, stop a pixel
+    // or two short of the extreme on the outward (right) tail, so pin the boundary explicitly to
+    // keep both ends of the chart symmetric.
+    posts.push({ id: 'edge', x: sub(extreme), opacity: 0.14 });
 
     // 1. Background Rectangles
     grp.selectAll('rect.ruler-bg')
@@ -515,6 +523,19 @@ function renderPiecewise(points, {
 
     const kbStep = event => event.shiftKey ? innerW * 0.02 : 5;
 
+    // A keyboard nudge updates the window in place (cheap — same path as a live mouse drag) and
+    // defers the heavy commit (state write + chart rebuild that re-settles Spread) until presses
+    // stop. Holding an arrow key then rebuilds once on release, not on every key repeat. This
+    // mirrors the mouse drag/dragend split. stopPan cancels a pending commit on teardown.
+    let kbCommit = null;
+    const scheduleCommit = () => {
+      if (kbCommit) clearTimeout(kbCommit);
+      kbCommit = setTimeout(() => {
+        kbCommit = null;
+        onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      }, 160);
+    };
+
     leftHandle.on('keydown', event => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
@@ -522,7 +543,8 @@ function renderPiecewise(points, {
       const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, currentR1 + dir * kbStep(event)));
       applyLeftDrag(px);
       leftHandle.attr('aria-valuenow', currentXLo);
-      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      scheduleCommit();
     });
 
     rightHandle.on('keydown', event => {
@@ -532,7 +554,8 @@ function renderPiecewise(points, {
       const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, currentR2 + dir * kbStep(event)));
       applyRightDrag(px);
       rightHandle.attr('aria-valuenow', currentXHi);
-      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      scheduleCommit();
     });
 
     overlay.on('keydown', event => {
@@ -551,7 +574,8 @@ function renderPiecewise(points, {
       if (newXLo < panLo) { newXHi -= (newXLo - panLo); newXLo = panLo; }
       if (newXHi > panHi) { newXLo -= (newXHi - panHi); newXHi = panHi; }
       applyState(newXLo, newXHi, newR1, newR2);
-      onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
+      scheduleCommit();
     });
 
     leftHandle.call(drag()
@@ -579,7 +603,38 @@ function renderPiecewise(points, {
         if (dragMoved) onWindowChange({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
     );
-    node.stopPan = () => { if (panTimer) { panTimer.stop(); panTimer = null; } };
+    node.stopPan = () => {
+      if (panTimer) { panTimer.stop(); panTimer = null; }
+      if (kbCommit) { clearTimeout(kbCommit); kbCommit = null; }
+    };
+
+    // Animated return to the auto (data-driven) window. Reset/double-click calls this instead
+    // of snapping: it tweens the linear window from wherever the user left it back to the
+    // quantile default, easing in and out, then hands control to onDone for the clean re-render.
+    let resetTimer = null;
+    node.animateToAuto = (targetWindow, onProgress, onDone) => {
+      if (resetTimer) { resetTimer.stop(); resetTimer = null; }
+      // The destination is a fresh auto scale at the target slider: read its window back.
+      const aim = scaleAdaptive()
+        .domain([xMin, xMax]).range([0, innerW])
+        .data(xValues).window(targetWindow).breakpointMethod('quantile');
+      const [aimXLo, aimXHi] = aim.linearDomain();
+      const [aimR1,  aimR2 ] = aim.linearRange();
+      const fromXLo = currentXLo, fromXHi = currentXHi, fromR1 = currentR1, fromR2 = currentR2;
+      const DURATION = 650;
+      resetTimer = timer(elapsed => {
+        const t = Math.min(1, elapsed / DURATION);
+        const e = easeCubicInOut(t);
+        applyState(
+          fromXLo + (aimXLo - fromXLo) * e,
+          fromXHi + (aimXHi - fromXHi) * e,
+          fromR1  + (aimR1  - fromR1)  * e,
+          fromR2  + (aimR2  - fromR2)  * e,
+        );
+        onProgress?.(e);
+        if (t >= 1) { resetTimer.stop(); resetTimer = null; onDone?.(); }
+      });
+    };
   }
 
   return node;

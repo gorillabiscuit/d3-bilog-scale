@@ -152,15 +152,20 @@ describe('window cap and pixel reserve', () => {
     expect(hi).toBeLessThanOrEqual(ceil + 1e-6);
   });
 
-  test('windowBounds() caps multi-decade data and is a no-op for compact data', () => {
+  test('windowBounds() exposes the full data extent (interaction can reach the edges)', () => {
     const wide = scaleAdaptive().data(bothTails).range([0, 800]);
-    const [wLo, wHi] = wide.windowBounds();
-    const [xMin, xMax] = wide.domain();
-    expect(wLo).toBeGreaterThan(xMin);
-    expect(wHi).toBeLessThan(xMax);
+    expect(wide.windowBounds()).toEqual(wide.domain());
 
-    const compact = scaleAdaptive().data(cluster).range([0, 800]); // < 1.5 decades
+    const compact = scaleAdaptive().data(cluster).range([0, 800]);
     expect(compact.windowBounds()).toEqual(compact.domain());
+  });
+
+  test('the auto window insets multi-decade data so a tail survives on each side', () => {
+    const wide = scaleAdaptive().data(bothTails).range([0, 800]); // default window, no drag override
+    const [lo, hi] = wide.linearDomain();
+    const [xMin, xMax] = wide.domain();
+    expect(lo).toBeGreaterThan(xMin);
+    expect(hi).toBeLessThan(xMax);
   });
 });
 

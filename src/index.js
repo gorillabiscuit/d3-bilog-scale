@@ -1,6 +1,7 @@
 import { createAdaptiveChart } from './chart/adaptive-chart.js';
 import { makeFmt }             from './utils/format.js';
 import { LOADERS }             from './data/loaders.js';
+import { registerSvgSaveShortcut } from './save-svg.js'; // app-only; not part of the Observable submission
 
 // ── UI refs ──────────────────────────────────────────────────────────────────
 
@@ -9,6 +10,7 @@ const datasetSelector = document.getElementById('dataset-selector');
 const alphaSlider     = document.getElementById('alpha-slider');
 const alphaValue      = document.getElementById('alpha-value');
 const themeToggle     = document.getElementById('theme-toggle');
+const resetScale      = document.getElementById('reset-scale');
 const jitterToggle    = document.getElementById('jitter-toggle');
 
 // ── App state ────────────────────────────────────────────────────────────────
@@ -18,7 +20,9 @@ let currentDataset = null;
 let manualXLo = null, manualXHi = null;
 let manualQLo = null, manualQHi = null;
 
-let currentTheme = 'dark';
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+let userOverrodeTheme = false;
+let currentTheme = systemDark.matches ? 'dark' : 'light';
 let jitterEnabled = true;
 let chartNode = null;       // current SVG element — setJitter() animates it in place
 let _spreadGeneration = 0; // increments on every render; RAF checks it to avoid stale animations
@@ -59,7 +63,7 @@ function updateRangeDisplay(xLo, xHi, xFormat) {
 // state instantly — used on re-renders from slider/drag so there's no lag.
 function renderExperimental(entranceAnimation = false) {
   if (!currentDataset) return;
-  const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s', noun = 'points' } = currentDataset;
+  const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s', yTicks, noun = 'points' } = currentDataset;
   const slider = +alphaSlider.value;
 
   const container = document.getElementById('chart-adaptive');
@@ -89,7 +93,7 @@ function renderExperimental(entranceAnimation = false) {
       }
       renderExperimental();
     },
-    xLabel, yLabel, xFormat, yFormat, rankNoun: noun,
+    xLabel, yLabel, xFormat, yFormat, yTicks, rankNoun: noun,
     // null  → skip simulation (jitter permanently off; setJitter will not be called)
     // false → run simulation, start at true positions (entrance animation; setJitter(true) fires after first paint)
     // true  → run simulation, start at spread positions
@@ -97,8 +101,13 @@ function renderExperimental(entranceAnimation = false) {
   });
   // Stop any pan auto-scroll timer from the previous chart before tearing it down.
   chartNode?.stopPan?.();
+  // Preserve keyboard focus across the rebuild: a deferred keyboard-nudge commit replaces the
+  // SVG, which would otherwise drop focus and strand a keyboard/screen-reader user mid-adjust.
+  const focusSel = ['.handle-left', '.handle-right', '.pan-overlay']
+    .find(sel => document.activeElement?.matches?.(sel));
   container.replaceChildren(el);
   chartNode = el;
+  if (focusSel) el.querySelector(focusSel)?.focus();
 
   if (jitterEnabled && entranceAnimation) {
     // Two RAF calls: first frame paints the initial (true) positions, second
@@ -144,25 +153,59 @@ jitterToggle.addEventListener('change', () => {
   }
 });
 
-themeToggle.addEventListener('click', () => {
-  currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
-  // Flip the attribute only — the chart's colours are CSS custom properties, so the live
-  // SVG reskins instantly without a rebuild.
-  document.documentElement.setAttribute('data-theme', currentTheme);
-  themeToggle.textContent = currentTheme === 'dark' ? '☀ Light' : '☾ Dark';
+function applyTheme(theme) {
+  currentTheme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  themeToggle.textContent = theme === 'dark' ? '☀ Light' : '☾ Dark';
+}
+
+// Initialise from system preference; keep in sync unless the user overrides manually.
+applyTheme(systemDark.matches ? 'dark' : 'light');
+systemDark.addEventListener('change', (e) => {
+  if (!userOverrodeTheme) applyTheme(e.matches ? 'dark' : 'light');
 });
 
-// Double-click anywhere on the chart resets to the default data-driven window — the
-// canonical d3 reset gesture (cf. d3-zoom / d3-brush). Reference-anchored handle drags make
-// the window un-trappable, but this is the quick way back to the centred quantile view.
-// Attached to the stable container (its SVG child is replaced on every render).
-document.getElementById('chart-adaptive').addEventListener('dblclick', () => {
+themeToggle.addEventListener('click', () => {
+  userOverrodeTheme = true;
+  applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+});
+
+// Clear the manual overrides and rebuild the clean auto view. Called at the end of the
+// reset animation, or directly when there's no chart to animate.
+function commitAutoView() {
   alphaSlider.value = 0.5;
   alphaValue.textContent = '0.50';
   manualXLo = null; manualXHi = null;
   manualQLo = null; manualQHi = null;
   renderExperimental();
-});
+}
+
+function resetScaleState() {
+  // No manual override (already auto) or no animated chart: just snap.
+  if ((manualXLo == null && manualQLo == null) || !chartNode?.animateToAuto) {
+    commitAutoView();
+    return;
+  }
+  // animateToAuto cancels any in-flight animation of its own, so repeat triggers just restart it.
+  const startSlider = +alphaSlider.value;
+  chartNode.animateToAuto(
+    0.5,
+    (e) => {                          // tween the slider readout alongside the window
+      const v = startSlider + (0.5 - startSlider) * e;
+      alphaSlider.value = v;
+      alphaValue.textContent = v.toFixed(2);
+    },
+    commitAutoView,
+  );
+}
+
+resetScale.addEventListener('click', resetScaleState);
+
+// Double-click anywhere on the chart resets to the default data-driven window — the
+// canonical d3 reset gesture (cf. d3-zoom / d3-brush). Reference-anchored handle drags make
+// the window un-trappable, but this is the quick way back to the centred quantile view.
+// Attached to the stable container (its SVG child is replaced on every render).
+document.getElementById('chart-adaptive').addEventListener('dblclick', resetScaleState);
 
 let _resizeTimer;
 const ro = new ResizeObserver(() => {
@@ -170,5 +213,8 @@ const ro = new ResizeObserver(() => {
   _resizeTimer = setTimeout(renderExperimental, 120);
 });
 document.querySelectorAll('.chart-container').forEach(el => ro.observe(el));
+
+// Press "S" to save the current chart as an SVG (app-only convenience, kept out of the chart code).
+registerSvgSaveShortcut(() => chartNode, () => currentDataset?.title ?? datasetSelector.value);
 
 load(datasetSelector.value);

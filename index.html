@@ -78,15 +78,24 @@
     /* ── Toolbar ─────────────────────────────────────────────────────────── */
     .chart-toolbar {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 0.75rem;
-      padding: 0 1rem;
-      height: 44px;
+      gap: 0.5rem 0.75rem;
+      padding: 0.5rem 1rem;
+      min-height: 44px;
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
       font-size: 0.8rem;
       color: var(--text-muted);
       transition: border-color 0.2s;
+    }
+    /* The flexible spacer pushes the right-hand controls over on wide screens; on narrow ones it
+       collapses so items wrap into rows instead of being clipped. */
+    .toolbar-gap { flex: 1 1 0; min-width: 0; }
+    /* Below ~720px the spacer stops pushing, so the controls stack into tidy rows. */
+    @media (max-width: 720px) {
+      .toolbar-gap { flex-basis: 100%; }
+      #status { max-width: none; }
     }
 
     .chart-title {
@@ -104,8 +113,6 @@
       flex-shrink: 0;
       transition: background 0.2s;
     }
-
-    .toolbar-gap { flex: 1; min-width: 0.5rem; }
 
     label {
       font-size: 0.8rem;
@@ -227,11 +234,12 @@
 
       <label for="dataset-selector">Dataset</label>
       <select id="dataset-selector">
-        <option value="usgs">USGS Earthquakes — magnitude / depth</option>
-        <option value="nyc" selected>NYC Property Sales — sale price / price per sq ft</option>
-        <option value="sba">SBA 7(a) Loans — loan amount / term</option>
+        <option value="cryptopunks2024" selected>CryptoPunks 2024 — principal / APR</option>
+        <option value="usgs">USGS Earthquakes — energy / depth</option>
+        <option value="nyc">NYC Property Sales — price / per sq ft</option>
+        <option value="sba">SBA 7(a) Loans — amount / term</option>
         <option value="forbes">Forbes Global 2000 — revenue / profit</option>
-        <option value="openalex">OpenAlex Citations — citation count / year</option>
+        <option value="openalex">OpenAlex Citations — count / year</option>
       </select>
 
       <div class="toolbar-sep"></div>
@@ -249,6 +257,7 @@
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
         <span class="toggle-label">Spread</span>
       </label>
+      <button id="reset-scale" title="Reset scale to default view">↺</button>
       <button id="theme-toggle">☀ Light</button>
     </div>
 

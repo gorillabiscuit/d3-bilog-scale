@@ -52,11 +52,19 @@ export function scaleAdaptive() {
   let hasLeft = false, hasRight = false;
   let tickPool = [];
 
-  // The outer bound on the linear window. On multi-decade data it sits 5% of the log span in
-  // from each extreme, so the window always leaves a log-tail on each side and can never
-  // flatten the cluster. Compact data returns the full domain, so the scale still degrades to
-  // linear. Exposed via scale.windowBounds() so interaction code (panning) can respect it.
+  // The outer bound the interaction code (pan, handle drag) clamps to: the full data extent, so a
+  // dragged window can reach the edges and flatten the cluster if you want (reset is the way back).
+  // Exposed via scale.windowBounds().
   function windowCap() {
+    return [_domain[0], _domain[1]];
+  }
+
+  // The bound used for the AUTO (data-driven) window only. On multi-decade positive data it insets
+  // 5% of the log span from each end, so the default view always leaves a log-tail on each side
+  // and never loads with a handle pinned to an edge. Compact or zero-crossing data returns the full
+  // extent, where the scale degrades cleanly to linear. This is deliberately NOT applied to a
+  // dragged window — only the initial/auto placement.
+  function autoWindowBounds() {
     const [xMin, xMax] = _domain;
     if (xMin > 0 && Math.log10(xMax / xMin) > 1.5) {
       const tf = Math.pow(xMax / xMin, 0.05);
@@ -82,7 +90,8 @@ export function scaleAdaptive() {
 
     // Determine domain boundaries (xLo, xHi)
     let lo, hi;
-    if (_xLoOverride != null && _xHiOverride != null) {
+    const isOverride = _xLoOverride != null && _xHiOverride != null;
+    if (isOverride) {
       lo = _xLoOverride;
       hi = _xHiOverride;
     } else if (_data.length >= 2) {
@@ -106,18 +115,22 @@ export function scaleAdaptive() {
 
     // Cap the window into [floor, ceil] by shifting it as a UNIT (preserving width). Clamping
     // the two edges independently would collapse a window panned entirely past a bound to zero
-    // width — the cause of the "$73.4M – $73.4M, linear $0" bug.
-    const [floor, ceil] = windowCap();
+    // width — the cause of the "$73.4M – $73.4M, linear $0" bug. A dragged window may reach the
+    // full data extent; the auto window insets so it always keeps a tail on each side.
+    const [floor, ceil] = isOverride ? [xMin, xMax] : autoWindowBounds();
     const width = Math.max(0, hi - lo);
     if (hi > ceil)  { hi = ceil;  lo = ceil - width; }
     if (lo < floor) { lo = floor; hi = Math.min(ceil, floor + width); }
 
-    // A tail spanning a negligible fraction of the data range is treated as absent. Without
-    // this, dragging the linear window's edge to a data extreme leaves a degenerate tail
-    // (e.g. $10–$10.2) that the pixel allocation still inflates to a "log ×0.0" strip.
+    // Whether each tail is present. A tail collapsed to (almost) nothing is treated as absent, so
+    // dragging an edge to a data extreme doesn't leave a degenerate "log ×0.0" sliver. For positive
+    // data the test is ratio-based: a left log tail from xMin to a slightly larger value spans tiny
+    // LINEAR width but is a real, visible log region, so a linear tolerance would wrongly dismiss it
+    // on multi-decade data (e.g. earthquake energy, where the cluster sits right at the minimum). A
+    // small linear fraction is the fallback when the domain starts at or crosses zero.
     const tailTol = (xMax - xMin) * 1e-8;
-    hasLeft = lo > xMin + tailTol;
-    hasRight = hi < xMax - tailTol;
+    hasLeft  = xMin > 0 ? lo / xMin > 1.01 : lo > xMin + tailTol;
+    hasRight = xMax > 0 ? xMax / hi > 1.01 : hi < xMax - tailTol;
 
     // Clamp to prevent out-of-bounds or zero-width linear region
     const eps = (xMax - xMin) * 1e-9;
@@ -149,17 +162,30 @@ export function scaleAdaptive() {
       p2 = rMax - wR;
     }
 
-    // Reserve a minimum pixel sliver for any tail that exists, so a present tail is never
-    // squeezed to a zero-width "log ×0.0" strip. Fit the linear region INTO the post-reserve
-    // band [loBound, hiBound], preserving its pixel width where it fits and shifting it inward
-    // to make room — reserving each edge independently would let the two reserves cross and
-    // invert the region (p1 > p2), breaking scale monotonicity on charts wider than ~1000px.
+    // minTail is the smallest a visible tail may be. The two paths treat a sub-minTail tail
+    // differently on purpose:
+    //
+    //  - INTERACTIVE (a drag/pan, where the user controls the window edge directly): the tail
+    //    COLLAPSES to flush, handing its pixels to the linear region. Flooring it instead froze
+    //    the window's edge at minTail while you kept dragging (a dead zone), then snapped to the
+    //    chart edge once the domain ratio test tripped — the reported bug. Collapse only ever
+    //    moves p1 left / p2 right, so the two edges can't cross and invert the linear region.
+    //
+    //  - AUTO (default / slider-driven window): the tail is FLOORED at minTail so the outliers
+    //    are never swallowed, even at the widest slider setting where they'd otherwise get zero
+    //    pixels. Fit the linear region into the post-reserve band so the two reserves can't
+    //    cross and invert the region (p1 > p2) on charts wider than ~1000px.
     const minTail = totalPixels * 0.02;
-    const loBound = hasLeft  ? rMin + minTail : rMin;
-    const hiBound = hasRight ? rMax - minTail : rMax;
-    const linW = Math.min(p2 - p1, hiBound - loBound);
-    p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
-    p2 = p1 + linW;
+    if (isOverride) {
+      if (hasLeft  && p1 - rMin < minTail) { hasLeft  = false; currentXLo = xMin; p1 = rMin; }
+      if (hasRight && rMax - p2 < minTail) { hasRight = false; currentXHi = xMax; p2 = rMax; }
+    } else {
+      const loBound = hasLeft  ? rMin + minTail : rMin;
+      const hiBound = hasRight ? rMax - minTail : rMax;
+      const linW = Math.min(p2 - p1, hiBound - loBound);
+      p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
+      p2 = p1 + linW;
+    }
 
     currentR1 = p1;
     currentR2 = p2;

@@ -84,7 +84,7 @@ export async function loadNYC() {
 
 export async function loadSBA() {
   // Local sample — the source CSV blocks CORS so we serve it from public/data/.
-  const res = await fetch('/data/sba-sample.csv');
+  const res = await fetch(import.meta.env.BASE_URL + 'data/sba-sample.csv');
   const text = await res.text();
   const points = csvParse(text)
     .slice(0, 600)
@@ -118,7 +118,7 @@ function parseForbesValue(str) {
 export async function loadForbes() {
   // Local sample — figshare blocks programmatic downloads with a WAF challenge.
   // Headers: RANK,NAME,HEADQUARTERS,INDUSTRY,SALES,PROFIT,ASSETS,MARKET VALUE
-  const res = await fetch('/data/forbes-sample.csv');
+  const res = await fetch(import.meta.env.BASE_URL + 'data/forbes-sample.csv');
   const text = await res.text();
   const points = csvParse(text)
     .map((r) => ({
@@ -137,6 +137,95 @@ export async function loadForbes() {
     title: 'Forbes Global 2000',
     description: 'Top 2000 companies by revenue. Spans ~$500M (bottom) to $370B+ (Berkshire Hathaway).',
     noun: 'companies',
+  };
+}
+
+export async function loadNFTLending() {
+  // Local sample from Dune Analytics — cross-protocol NFT loan principals + APR 2023-2025.
+  // Protocols: NFTfi, Blur Blend, Arcade.
+  const res = await fetch(import.meta.env.BASE_URL + 'data/nft-lending-sample.csv');
+  const text = await res.text();
+  const points = csvParse(text)
+    .map((r) => {
+      const usd = Number(r.principal_usd);
+      const apr = Number(r.apr_pct);
+      const fmtUSD = (v) => '$' + (v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : Math.round(v));
+      return {
+        x: usd,
+        y: apr,
+        label: `${r.collection_name} #${r.token_id}`,
+        meta: joinMeta(fmtUSD(usd), `${apr.toFixed(1)}% APR`, r.protocol),
+      };
+    })
+    .filter((p) => p.x > 0 && p.y >= 1 && Number.isFinite(p.x) && Number.isFinite(p.y));
+  return {
+    points,
+    xLabel: 'Loan principal (USD)',
+    yLabel: 'APR (%)',
+    xFormat: 'currency',
+    yFormat: '.1f',
+    title: 'NFT Lending (2023-2025)',
+    description: 'Cross-protocol NFT loans: NFTfi, Blur Blend, and Arcade. Sub-$100 micro-loans through six-figure CryptoPunks and BAYC deals.',
+    noun: 'loans',
+  };
+}
+
+export async function loadCryptoPunks() {
+  // CryptoPunks and Wrapped CryptoPunks loans from Dune Analytics 2023-2025.
+  // Protocols: NFTfi, Blur Blend, Arcade. All loans collateralised by punk NFTs only.
+  const res = await fetch(import.meta.env.BASE_URL + 'data/nft-lending-cryptopunks.csv');
+  const text = await res.text();
+  const points = csvParse(text)
+    .map((r) => {
+      const usd = Number(r.principal_usd);
+      const apr = Number(r.apr_pct);
+      const fmtUSD = (v) => '$' + (v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : Math.round(v));
+      return {
+        x: usd,
+        y: apr,
+        label: `CryptoPunk #${r.token_id}`,
+        meta: joinMeta(fmtUSD(usd), `${apr.toFixed(1)}% APR`, r.protocol),
+      };
+    })
+    .filter((p) => p.x > 0 && p.y >= 1 && Number.isFinite(p.x) && Number.isFinite(p.y));
+  return {
+    points,
+    xLabel: 'Loan principal (USD)',
+    yLabel: 'APR (%)',
+    xFormat: 'currency',
+    yFormat: '.1f',
+    title: 'CryptoPunks Loans (2022-present)',
+    description: 'NFT loans collateralised by CryptoPunks across NFTfi, Blur Blend, Arcade, and Gondi. $2.75M outlier (Gondi, punk #8348) alongside $1K micro-loans.',
+    noun: 'loans',
+  };
+}
+
+export async function loadCryptoPunks2024() {
+  // CryptoPunks loans from 2024 only: NFTfi, Blur Blend, Arcade, Gondi.
+  const res = await fetch(import.meta.env.BASE_URL + 'data/nft-lending-cryptopunks-2024.csv');
+  const text = await res.text();
+  const points = csvParse(text)
+    .map((r) => {
+      const usd = Number(r.principal_usd);
+      const apr = Number(r.apr_pct);
+      const fmtUSD = (v) => '$' + (v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : Math.round(v));
+      return {
+        x: usd,
+        y: apr,
+        label: `CryptoPunk #${r.token_id}`,
+        meta: joinMeta(fmtUSD(usd), `${apr.toFixed(1)}% APR`, r.protocol),
+      };
+    })
+    .filter((p) => p.x > 0 && p.y >= 1 && Number.isFinite(p.x) && Number.isFinite(p.y));
+  return {
+    points,
+    xLabel: 'Loan principal (USD)',
+    yLabel: 'APR (%)',
+    xFormat: 'currency',
+    yFormat: '.1f',
+    title: 'CryptoPunks Loans (2024)',
+    description: 'CryptoPunks loans originated in 2024 across NFTfi, Blur Blend, Arcade, and Gondi. 1,220 loans, $1.3K–$2.75M range.',
+    noun: 'loans',
   };
 }
 
@@ -169,6 +258,9 @@ export async function loadOpenAlex() {
 }
 
 export const LOADERS = {
+  nftlending: loadNFTLending,
+  cryptopunks: loadCryptoPunks,
+  cryptopunks2024: loadCryptoPunks2024,
   usgs: loadUSGS,
   nyc: loadNYC,
   sba: loadSBA,
