@@ -162,30 +162,21 @@ export function scaleAdaptive() {
       p2 = rMax - wR;
     }
 
-    // minTail is the smallest a visible tail may be. The two paths treat a sub-minTail tail
-    // differently on purpose:
-    //
-    //  - INTERACTIVE (a drag/pan, where the user controls the window edge directly): the tail
-    //    COLLAPSES to flush, handing its pixels to the linear region. Flooring it instead froze
-    //    the window's edge at minTail while you kept dragging (a dead zone), then snapped to the
-    //    chart edge once the domain ratio test tripped — the reported bug. Collapse only ever
-    //    moves p1 left / p2 right, so the two edges can't cross and invert the linear region.
-    //
-    //  - AUTO (default / slider-driven window): the tail is FLOORED at minTail so the outliers
-    //    are never swallowed, even at the widest slider setting where they'd otherwise get zero
-    //    pixels. Fit the linear region into the post-reserve band so the two reserves can't
-    //    cross and invert the region (p1 > p2) on charts wider than ~1000px.
+    // Reserve a minimum pixel sliver for any tail that exists, so a present tail is never squeezed
+    // to a zero-width "log ×0.0" strip. Fit the linear region INTO the post-reserve band, preserving
+    // its pixel width where it fits and shifting it inward to make room — reserving each edge
+    // independently would let the two reserves cross and invert the region (p1 > p2), breaking
+    // monotonicity on charts wider than ~1000px. This applies to dragged (override) and auto windows
+    // alike: special-casing the drag path to collapse the tail to the extreme made panning teleport
+    // to the edge the moment a tail shrank past minTail — the reported "jumps straight to the side"
+    // bug. As a tail genuinely disappears, the ratio/linear test above flips hasLeft/hasRight false
+    // and the linear region gets the full span, so panning to an edge stays smooth.
     const minTail = totalPixels * 0.02;
-    if (isOverride) {
-      if (hasLeft  && p1 - rMin < minTail) { hasLeft  = false; currentXLo = xMin; p1 = rMin; }
-      if (hasRight && rMax - p2 < minTail) { hasRight = false; currentXHi = xMax; p2 = rMax; }
-    } else {
-      const loBound = hasLeft  ? rMin + minTail : rMin;
-      const hiBound = hasRight ? rMax - minTail : rMax;
-      const linW = Math.min(p2 - p1, hiBound - loBound);
-      p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
-      p2 = p1 + linW;
-    }
+    const loBound = hasLeft  ? rMin + minTail : rMin;
+    const hiBound = hasRight ? rMax - minTail : rMax;
+    const linW = Math.min(p2 - p1, hiBound - loBound);
+    p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
+    p2 = p1 + linW;
 
     currentR1 = p1;
     currentR2 = p2;
