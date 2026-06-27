@@ -52,19 +52,14 @@ export function scaleAdaptive() {
   let hasLeft = false, hasRight = false;
   let tickPool = [];
 
-  // The outer bound the interaction code (pan, handle drag) clamps to: the full data extent, so a
-  // dragged window can reach the edges and flatten the cluster if you want (reset is the way back).
-  // Exposed via scale.windowBounds().
+  // The outer bound on the linear window — applied to BOTH the auto/default placement and to
+  // interaction (pan, handle drag). On multi-decade positive data it sits 5% of the log span in
+  // from each extreme, so the window always leaves a log-tail on each side and can never flatten
+  // the cluster: because the window can never reach an extreme, a tail can never vanish, so the
+  // tail-collapse "snap" is structurally impossible. Compact or zero-crossing data returns the
+  // full domain, so the scale still degrades cleanly to linear. Exposed via scale.windowBounds()
+  // so interaction code clamps to it.
   function windowCap() {
-    return [_domain[0], _domain[1]];
-  }
-
-  // The bound used for the AUTO (data-driven) window only. On multi-decade positive data it insets
-  // 5% of the log span from each end, so the default view always leaves a log-tail on each side
-  // and never loads with a handle pinned to an edge. Compact or zero-crossing data returns the full
-  // extent, where the scale degrades cleanly to linear. This is deliberately NOT applied to a
-  // dragged window — only the initial/auto placement.
-  function autoWindowBounds() {
     const [xMin, xMax] = _domain;
     if (xMin > 0 && Math.log10(xMax / xMin) > 1.5) {
       const tf = Math.pow(xMax / xMin, 0.05);
@@ -115,9 +110,9 @@ export function scaleAdaptive() {
 
     // Cap the window into [floor, ceil] by shifting it as a UNIT (preserving width). Clamping
     // the two edges independently would collapse a window panned entirely past a bound to zero
-    // width — the cause of the "$73.4M – $73.4M, linear $0" bug. A dragged window may reach the
-    // full data extent; the auto window insets so it always keeps a tail on each side.
-    const [floor, ceil] = isOverride ? [xMin, xMax] : autoWindowBounds();
+    // width — the cause of the "$73.4M – $73.4M, linear $0" bug. The cap applies to dragged and
+    // auto windows alike, so neither can spread far enough to flatten the cluster / vanish a tail.
+    const [floor, ceil] = windowCap();
     const width = Math.max(0, hi - lo);
     if (hi > ceil)  { hi = ceil;  lo = ceil - width; }
     if (lo < floor) { lo = floor; hi = Math.min(ceil, floor + width); }
@@ -150,19 +145,12 @@ export function scaleAdaptive() {
     // Determine range boundaries (r1, r2)
     let p1, p2;
     if (_r1Override != null && _r2Override != null) {
-      // An absent tail gets no pixels even under an explicit override, so the linear region extends
-      // to the chart edge instead of leaving a degenerate strip behind. While a tail is still present
-      // but nearly gone, taper its pixels to zero by LOG extent rather than honouring the box pixel
-      // verbatim: a pan moves the box linearly, but a tail compresses logarithmically approaching an
-      // extreme, so on data with a small xMin the domain reaches the extreme while the box is still
-      // mid-slide, and the tail's whole pixel band would dump into the linear region in one jump the
-      // instant the tail vanishes — the "pan snaps to the end" bug. Tapering brings the boundary to
-      // the edge in sync with the domain reaching xMin/xMax, so the linear region grows smoothly.
-      const TAPER_DECADES = 0.6;
-      const lf = !hasLeft  ? 0 : xMin > 0 ? Math.min(1, Math.log10(currentXLo / xMin) / TAPER_DECADES) : 1;
-      const rf = !hasRight ? 0 : xMax > 0 ? Math.min(1, Math.log10(xMax / currentXHi) / TAPER_DECADES) : 1;
-      p1 = rMin + (_r1Override - rMin) * lf;
-      p2 = rMax - (rMax - _r2Override) * rf;
+      // An absent tail gets no pixels even under an explicit override, so the linear region
+      // extends to the chart edge instead of leaving a degenerate strip behind. The boundary
+      // renders exactly at the override pixel so invert(p1) === currentXLo holds — interaction
+      // code (handle drag) sets xLo = invert(cursor) and relies on that round-trip.
+      p1 = hasLeft ? _r1Override : rMin;
+      p2 = hasRight ? _r2Override : rMax;
     } else {
       const qLo = hasLeft ? Math.max(0, 0.5 - _window / 2) : 0;
       const qHi = hasRight ? Math.min(1, 0.5 + _window / 2) : 1;
