@@ -129,8 +129,9 @@ export function scaleAdaptive() {
     // on multi-decade data (e.g. earthquake energy, where the cluster sits right at the minimum). A
     // small linear fraction is the fallback when the domain starts at or crosses zero.
     const tailTol = (xMax - xMin) * 1e-8;
-    hasLeft  = xMin > 0 ? lo / xMin > 1.01 : lo > xMin + tailTol;
-    hasRight = xMax > 0 ? xMax / hi > 1.01 : hi < xMax - tailTol;
+    const TAIL_RATIO = 1.01; // a positive tail exists once it spans >1% of the extreme, ratio-wise
+    hasLeft  = xMin > 0 ? lo / xMin > TAIL_RATIO : lo > xMin + tailTol;
+    hasRight = xMax > 0 ? xMax / hi > TAIL_RATIO : hi < xMax - tailTol;
 
     // Clamp to prevent out-of-bounds or zero-width linear region
     const eps = (xMax - xMin) * 1e-9;
@@ -172,8 +173,18 @@ export function scaleAdaptive() {
     // bug. As a tail genuinely disappears, the ratio/linear test above flips hasLeft/hasRight false
     // and the linear region gets the full span, so panning to an edge stays smooth.
     const minTail = totalPixels * 0.02;
-    const loBound = hasLeft  ? rMin + minTail : rMin;
-    const hiBound = hasRight ? rMax - minTail : rMax;
+    // Taper the reserved sliver to zero as a tail nears vanishing, so panning to an extreme glides
+    // to the edge instead of holding at the reserve and then releasing all of it in one jump when
+    // the existence test flips — the "snap at the edge" the reserve otherwise causes. The ramp is
+    // keyed to the same ratio hasLeft/hasRight use and hits zero exactly at TAIL_RATIO, so the
+    // reserve and the flip coincide and the transition is continuous. Far from an edge (default and
+    // auto views, where the ratio is large) the reserve is full, so outliers keep guaranteed pixels.
+    const RAMP_RATIO = 2.0; // a tail >=2x from the extreme gets the full reserve; below that it tapers
+    const taper = ratio => Math.max(0, Math.min(1, (ratio - TAIL_RATIO) / (RAMP_RATIO - TAIL_RATIO)));
+    const leftReserve  = hasLeft  ? minTail * (xMin > 0 ? taper(currentXLo / xMin) : 1) : 0;
+    const rightReserve = hasRight ? minTail * (xMax > 0 ? taper(xMax / currentXHi) : 1) : 0;
+    const loBound = rMin + leftReserve;
+    const hiBound = rMax - rightReserve;
     const linW = Math.min(p2 - p1, hiBound - loBound);
     p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
     p2 = p1 + linW;
