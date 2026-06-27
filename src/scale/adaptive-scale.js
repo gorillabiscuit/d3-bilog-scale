@@ -150,10 +150,19 @@ export function scaleAdaptive() {
     // Determine range boundaries (r1, r2)
     let p1, p2;
     if (_r1Override != null && _r2Override != null) {
-      // An absent tail gets no pixels even under an explicit override, so the linear region
-      // extends to the chart edge instead of leaving a degenerate strip behind.
-      p1 = hasLeft ? _r1Override : rMin;
-      p2 = hasRight ? _r2Override : rMax;
+      // An absent tail gets no pixels even under an explicit override, so the linear region extends
+      // to the chart edge instead of leaving a degenerate strip behind. While a tail is still present
+      // but nearly gone, taper its pixels to zero by LOG extent rather than honouring the box pixel
+      // verbatim: a pan moves the box linearly, but a tail compresses logarithmically approaching an
+      // extreme, so on data with a small xMin the domain reaches the extreme while the box is still
+      // mid-slide, and the tail's whole pixel band would dump into the linear region in one jump the
+      // instant the tail vanishes — the "pan snaps to the end" bug. Tapering brings the boundary to
+      // the edge in sync with the domain reaching xMin/xMax, so the linear region grows smoothly.
+      const TAPER_DECADES = 0.6;
+      const lf = !hasLeft  ? 0 : xMin > 0 ? Math.min(1, Math.log10(currentXLo / xMin) / TAPER_DECADES) : 1;
+      const rf = !hasRight ? 0 : xMax > 0 ? Math.min(1, Math.log10(xMax / currentXHi) / TAPER_DECADES) : 1;
+      p1 = rMin + (_r1Override - rMin) * lf;
+      p2 = rMax - (rMax - _r2Override) * rf;
     } else {
       const qLo = hasLeft ? Math.max(0, 0.5 - _window / 2) : 0;
       const qHi = hasRight ? Math.min(1, 0.5 + _window / 2) : 1;
