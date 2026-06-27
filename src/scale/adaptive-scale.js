@@ -161,28 +161,17 @@ export function scaleAdaptive() {
       p2 = rMax - wR;
     }
 
-    // Reserve a minimum pixel sliver for any tail that exists, so a present tail is never squeezed
-    // to a zero-width "log ×0.0" strip. Fit the linear region INTO the post-reserve band, preserving
-    // its pixel width where it fits and shifting it inward to make room — reserving each edge
-    // independently would let the two reserves cross and invert the region (p1 > p2), breaking
-    // monotonicity on charts wider than ~1000px. This applies to dragged (override) and auto windows
-    // alike: special-casing the drag path to collapse the tail to the extreme made panning teleport
-    // to the edge the moment a tail shrank past minTail — the reported "jumps straight to the side"
-    // bug. As a tail genuinely disappears, the ratio/linear test above flips hasLeft/hasRight false
-    // and the linear region gets the full span, so panning to an edge stays smooth.
+    // Reserve a minimum pixel width for any tail that exists, so a present tail keeps a consistent,
+    // visible sliver instead of collapsing toward zero pixels as a pan nears an extreme. The window
+    // cap guarantees the window can never actually reach xMin/xMax on multi-decade data, so a tail
+    // never vanishes (hasLeft/hasRight stay true) and this reserve never has to "release" — there is
+    // no flip, so holding a full (untapered) reserve keeps the tail width steady right up to the edge
+    // with no snap. Fit the linear region INTO the post-reserve band, preserving its pixel width where
+    // it fits and shifting it inward to make room — reserving each edge independently could let the
+    // two reserves cross and invert the region (p1 > p2) on wide charts.
     const minTail = totalPixels * 0.02;
-    // Taper the reserved sliver to zero as a tail nears vanishing, so panning to an extreme glides
-    // to the edge instead of holding at the reserve and then releasing all of it in one jump when
-    // the existence test flips — the "snap at the edge" the reserve otherwise causes. The ramp is
-    // keyed to the same ratio hasLeft/hasRight use and hits zero exactly at TAIL_RATIO, so the
-    // reserve and the flip coincide and the transition is continuous. Far from an edge (default and
-    // auto views, where the ratio is large) the reserve is full, so outliers keep guaranteed pixels.
-    const RAMP_RATIO = 2.0; // a tail >=2x from the extreme gets the full reserve; below that it tapers
-    const taper = ratio => Math.max(0, Math.min(1, (ratio - TAIL_RATIO) / (RAMP_RATIO - TAIL_RATIO)));
-    const leftReserve  = hasLeft  ? minTail * (xMin > 0 ? taper(currentXLo / xMin) : 1) : 0;
-    const rightReserve = hasRight ? minTail * (xMax > 0 ? taper(xMax / currentXHi) : 1) : 0;
-    const loBound = rMin + leftReserve;
-    const hiBound = rMax - rightReserve;
+    const loBound = hasLeft  ? rMin + minTail : rMin;
+    const hiBound = hasRight ? rMax - minTail : rMax;
     const linW = Math.min(p2 - p1, hiBound - loBound);
     p1 = Math.max(loBound, Math.min(p1, hiBound - linW));
     p2 = p1 + linW;
