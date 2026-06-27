@@ -104,8 +104,10 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
   // A pan/handle release recomputes the spread; capture the outgoing dots' cy (by index — same
   // dataset, same order) so the rebuilt chart can ease from them to the new spread instead of
   // snapping. Captured before replaceChildren destroys the old SVG.
+  // Only the data dots (.dots circle) — NOT the handles' grip circles, which would shift the index
+  // alignment and make each dot ease from a neighbour's old position.
   const oldCy = (animateSpread && jitterEnabled && chartNode)
-    ? Array.from(chartNode.querySelectorAll('circle')).map(c => +c.getAttribute('cy'))
+    ? Array.from(chartNode.querySelectorAll('.dots circle')).map(c => +c.getAttribute('cy'))
     : null;
   // Preserve keyboard focus across the rebuild: a deferred keyboard-nudge commit replaces the
   // SVG, which would otherwise drop focus and strand a keyboard/screen-reader user mid-adjust.
