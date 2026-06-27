@@ -285,5 +285,22 @@ export function createChart(points, xScale, {
       .ease(enabled ? easeBackOut.overshoot(1.4) : easeCubicInOut)
       .attr('cy', (_, i) => enabled ? jNodes[i].y : jNodes[i].cy0);
   };
+
+  // Animate the spread from a set of incoming cy values to this render's settled spread. A pan or
+  // handle release rebuilds the SVG with freshly-computed spread positions; the caller passes the
+  // dots' previous cy (by index — same dataset, same order) so each dot eases from where it was to
+  // where it now belongs instead of snapping. cy is set synchronously first (before paint) so there
+  // is no one-frame flash at the new positions. easeCubicInOut keeps it quick and smooth (no bounce).
+  svgNode.springSpreadFrom = (fromCy, duration = 320) => {
+    if (jitter === null || !fromCy) return;
+    // Set the incoming positions synchronously (before paint, so there's no flash at the new
+    // spread), then start the transition on the next frame. A transition created in the same
+    // synchronous block as the freshly-inserted element jumps straight to its end; deferring one
+    // frame — the same way the entrance animation does — lets it actually animate.
+    circles.interrupt().attr('cy', (_, i) => fromCy[i] != null ? fromCy[i] : jNodes[i].y);
+    requestAnimationFrame(() => {
+      circles.transition().duration(duration).ease(easeCubicInOut).attr('cy', (_, i) => jNodes[i].y);
+    });
+  };
   return svgNode;
 }

@@ -61,7 +61,7 @@ function updateRangeDisplay(xLo, xHi, xFormat) {
 // entranceAnimation=true: dots render at true positions then spring to jittered
 // after first paint — used on new data loads. false: render at correct jitter
 // state instantly — used on re-renders from slider/drag so there's no lag.
-function renderExperimental(entranceAnimation = false) {
+function renderExperimental(entranceAnimation = false, animateSpread = false) {
   if (!currentDataset) return;
   const { points, xLabel, yLabel, xFormat = '~s', yFormat = '~s', yTicks, noun = 'points' } = currentDataset;
   const slider = +alphaSlider.value;
@@ -91,7 +91,7 @@ function renderExperimental(entranceAnimation = false) {
         alphaSlider.value = w;
         alphaValue.textContent = w.toFixed(2);
       }
-      renderExperimental();
+      renderExperimental(false, true);
     },
     xLabel, yLabel, xFormat, yFormat, yTicks, rankNoun: noun,
     // null  → skip simulation (jitter permanently off; setJitter will not be called)
@@ -101,6 +101,12 @@ function renderExperimental(entranceAnimation = false) {
   });
   // Stop any pan auto-scroll timer from the previous chart before tearing it down.
   chartNode?.stopPan?.();
+  // A pan/handle release recomputes the spread; capture the outgoing dots' cy (by index — same
+  // dataset, same order) so the rebuilt chart can ease from them to the new spread instead of
+  // snapping. Captured before replaceChildren destroys the old SVG.
+  const oldCy = (animateSpread && jitterEnabled && chartNode)
+    ? Array.from(chartNode.querySelectorAll('circle')).map(c => +c.getAttribute('cy'))
+    : null;
   // Preserve keyboard focus across the rebuild: a deferred keyboard-nudge commit replaces the
   // SVG, which would otherwise drop focus and strand a keyboard/screen-reader user mid-adjust.
   const focusSel = ['.handle-left', '.handle-right', '.pan-overlay']
@@ -118,6 +124,12 @@ function renderExperimental(entranceAnimation = false) {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (_spreadGeneration === gen) chartNode?.setJitter(true, 700);
     }));
+  } else if (oldCy) {
+    // Ease the recomputed spread from the outgoing positions. Run synchronously (before paint) so
+    // there's no flash at the new positions, and bump the generation so any pending entrance RAF
+    // from a prior render is cancelled.
+    _spreadGeneration++;
+    chartNode.springSpreadFrom?.(oldCy, 320);
   }
 }
 
@@ -207,10 +219,18 @@ resetScale.addEventListener('click', resetScaleState);
 // Attached to the stable container (its SVG child is replaced on every render).
 document.getElementById('chart-adaptive').addEventListener('dblclick', resetScaleState);
 
-let _resizeTimer;
-const ro = new ResizeObserver(() => {
+let _resizeTimer, _lastW = 0, _lastH = 0;
+const ro = new ResizeObserver(entries => {
+  // Re-render only on a real size change. Each render calls replaceChildren on the chart, which can
+  // re-notify the observer at the SAME size; without this guard that spurious notification fires a
+  // plain (un-animated) re-render ~120ms later that replaces the chart mid-transition and snaps the
+  // spread animation — and can loop. Ignoring no-op notifications lets the release animation finish.
+  const { width, height } = entries[0].contentRect;
+  const w = Math.round(width), h = Math.round(height);
+  if (w === _lastW && h === _lastH) return;
+  _lastW = w; _lastH = h;
   clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(renderExperimental, 120);
+  _resizeTimer = setTimeout(() => renderExperimental(), 120);
 });
 document.querySelectorAll('.chart-container').forEach(el => ro.observe(el));
 
