@@ -148,6 +148,7 @@ export function createChart(points, xScale, {
 
   // ── Dots ─────────────────────────────────────────────────────────────────
   const circles = g.append('g')
+    .attr('class', 'dots')
     .attr('clip-path', `url(#${clipId})`)
     .selectAll('circle')
     .data(points)

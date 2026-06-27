@@ -521,6 +521,10 @@ function renderPiecewise(points, {
     leftHandle  = makeHandle(r1, 'left');
     rightHandle = makeHandle(r2, 'right');
 
+    // Dots sit above the handles so a point under a handle line still shows its tooltip on hover.
+    // Points are tiny, so the full-height handle hit-line stays grabbable everywhere they aren't.
+    g.select('g.dots').raise();
+
     const kbStep = event => event.shiftKey ? innerW * 0.02 : 5;
 
     // A keyboard nudge updates the window in place (cheap — same path as a live mouse drag) and
