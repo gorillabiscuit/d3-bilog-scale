@@ -435,6 +435,26 @@ function renderPiecewise(points, {
       return [Math.max(currentXLo - (k + 1) * W, xMin), currentXLo - k * W];
     }
 
+    // The next window-width chunk in `dir` (>0 right, <0 left) that actually contains data — skips
+    // empty chunks so arrow-stepping lands on the next populated section instead of stalling on a gap.
+    // Returns null when there's no more data that way (the end of the range).
+    function nextChunkWithData(dir) {
+      const W = currentXHi - currentXLo;
+      if (!(W > 0)) return null;
+      if (dir > 0) {
+        let next = Infinity;
+        for (const x of xValues) if (x > currentXHi + eps && x < next) next = x;
+        if (!isFinite(next)) return null;
+        const k = Math.max(0, Math.floor((next - currentXHi) / W));
+        return [currentXHi + k * W, Math.min(currentXHi + (k + 1) * W, xMax)];
+      }
+      let prev = -Infinity;
+      for (const x of xValues) if (x < currentXLo - eps && x > prev) prev = x;
+      if (!isFinite(prev)) return null;
+      const k = Math.max(0, Math.floor((currentXLo - prev) / W));
+      return [Math.max(currentXLo - (k + 1) * W, xMin), currentXLo - k * W];
+    }
+
     function highlightChunk(side, px) {
       const chunk = chunkAt(side, px);
       if (!chunk) { chunkHL.attr('fill-opacity', 0); return; }
@@ -680,9 +700,8 @@ function renderPiecewise(points, {
       // key advances one section per animation rather than dragging the axis along.
       if (!event.shiftKey) {
         if (animating) return;
-        const W = currentXHi - currentXLo;
-        if (dir > 0 && currentXHi < xMax - eps) travelTo(currentXHi, Math.min(currentXHi + W, xMax));
-        else if (dir < 0 && currentXLo > xMin + eps) travelTo(Math.max(currentXLo - W, xMin), currentXLo);
+        const chunk = nextChunkWithData(dir); // skips empty chunks; null at the end of the data
+        if (chunk) travelTo(chunk[0], chunk[1]);
         return;
       }
 
