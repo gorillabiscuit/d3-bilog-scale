@@ -44,6 +44,10 @@ export function scaleAdaptive() {
   let _xHiOverride = null;
   let _r1Override = null;
   let _r2Override = null;
+  // When true (set only via focusDomain), rebuild() skips the windowCap unit-shift so the linear
+  // window can sit exactly on an explicit range — the "travel onto a log section" gesture. Every
+  // linearDomain() call (pan/drag, auto window) clears it, so interaction stays on the capped path.
+  let _focusUncapped = false;
 
   // Internal scales
   let leftScale, midScale, rightScale;
@@ -113,10 +117,15 @@ export function scaleAdaptive() {
     // the two edges independently would collapse a window panned entirely past a bound to zero
     // width — the cause of the "$73.4M – $73.4M, linear $0" bug. The cap applies to dragged and
     // auto windows alike, so neither can spread far enough to flatten the cluster / vanish a tail.
-    const [floor, ceil] = windowCap();
-    const width = Math.max(0, hi - lo);
-    if (hi > ceil)  { hi = ceil;  lo = ceil - width; }
-    if (lo < floor) { lo = floor; hi = Math.min(ceil, floor + width); }
+    // The focusDomain() "travel" gesture deliberately opts out (_focusUncapped) so the window can
+    // sit exactly on a log section's range — there the previously-focused data becomes the tail,
+    // which is the point. Boundaries stay valid: the L134-135 clamp keeps them inside [xMin,xMax].
+    if (!_focusUncapped) {
+      const [floor, ceil] = windowCap();
+      const width = Math.max(0, hi - lo);
+      if (hi > ceil)  { hi = ceil;  lo = ceil - width; }
+      if (lo < floor) { lo = floor; hi = Math.min(ceil, floor + width); }
+    }
 
     // Whether each tail is present. A tail collapsed to (almost) nothing is treated as absent, so
     // dragging an edge to a data extreme doesn't leave a degenerate "log ×0.0" sliver. For positive
@@ -245,12 +254,31 @@ export function scaleAdaptive() {
 
   scale.linearDomain = function (ld) {
     if (!arguments.length) return [currentXLo, currentXHi];
+    _focusUncapped = false; // capped path — pan/drag and the auto window live here
     if (ld == null) {
       _xLoOverride = null;
       _xHiOverride = null;
     } else {
       _xLoOverride = +ld[0];
       _xHiOverride = +ld[1];
+    }
+    rebuild();
+    return scale;
+  };
+
+  // Like linearDomain(), but flags the window as uncapped so rebuild() places it exactly on [lo,hi]
+  // even past the windowCap bound. Used only by the "travel onto a log section" gesture — clicking
+  // or arrow-keying a tail focuses its data, turning the previously-focused data into a log tail.
+  scale.focusDomain = function (fd) {
+    if (!arguments.length) return [currentXLo, currentXHi];
+    if (fd == null) {
+      _xLoOverride = null;
+      _xHiOverride = null;
+      _focusUncapped = false;
+    } else {
+      _xLoOverride = +fd[0];
+      _xHiOverride = +fd[1];
+      _focusUncapped = true;
     }
     rebuild();
     return scale;
@@ -319,7 +347,10 @@ export function scaleAdaptive() {
       .window(_window)
       .breakpointMethod(_method)
       .data(_data.slice());
-    if (_xLoOverride != null) clone.linearDomain([_xLoOverride, _xHiOverride]);
+    if (_xLoOverride != null) {
+      if (_focusUncapped) clone.focusDomain([_xLoOverride, _xHiOverride]);
+      else clone.linearDomain([_xLoOverride, _xHiOverride]);
+    }
     if (_r1Override != null) clone.linearRange([_r1Override, _r2Override]);
     return clone;
   };

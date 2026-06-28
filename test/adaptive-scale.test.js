@@ -173,6 +173,84 @@ describe('window cap and pixel reserve', () => {
   });
 });
 
+describe('focus travel (uncapped, via focusDomain)', () => {
+  // The "travel onto a log section" gesture: focusDomain places the linear window EXACTLY on a
+  // range even past the windowCap bound, so whichever data was in that section fills the linear
+  // region and the previously-focused data becomes a log tail.
+  test('reaches a range the windowCap would otherwise pull in', () => {
+    const focused = makeScale().focusDomain([500, 5000]); // window runs up to the extreme
+    expect(focused.linearDomain()[0]).toBeCloseTo(500, 3);
+    expect(focused.linearDomain()[1]).toBeCloseTo(5000, 3);
+
+    // The same request through the capped path is shifted well inside the requested range.
+    const capped = makeScale().linearDomain([500, 5000]);
+    expect(capped.linearDomain()[1]).toBeLessThan(4500);
+    expect(capped.linearDomain()[0]).toBeLessThan(100);
+  });
+
+  test('focusing the right outliers turns everything below into a leading log region', () => {
+    const s = makeScale().focusDomain([500, 5000]);
+    const regions = s.regions();
+    expect(regions[0].type).toBe('log');
+    expect(regions[0].domain[0]).toBeCloseTo(s.domain()[0], 3);
+    expect(regions[0].domain[1]).toBeCloseTo(500, 3);
+    const linear = regions.find((r) => r.type === 'linear');
+    expect(linear.domain[0]).toBeCloseTo(500, 3);
+    expect(linear.domain[1]).toBeCloseTo(5000, 3);
+  });
+
+  test('monotonicity holds across 1000 values under focus', () => {
+    const s = makeScale().focusDomain([500, 5000]);
+    const [dMin, dMax] = s.domain();
+    const step = (dMax - dMin) / 1000;
+    for (let v = dMin; v < dMax - step; v += step) {
+      expect(s(v)).toBeLessThan(s(v + step));
+    }
+  });
+
+  test('invert(scale(v)) ≈ v under focus', () => {
+    const s = makeScale().focusDomain([500, 5000]);
+    const [dMin, dMax] = s.domain();
+    const testValues = Array.from({ length: 50 }, (_, i) => dMin + (i / 49) * (dMax - dMin));
+    for (const v of testValues) {
+      const relErr = Math.abs(s.invert(s(v)) - v) / (Math.abs(v) + 1e-10);
+      expect(relErr).toBeLessThan(1e-6);
+    }
+  });
+
+  test('boundary pixel is continuous from both sides under focus', () => {
+    const s = makeScale().focusDomain([500, 5000]);
+    const b = 500; // the linear / left-tail boundary
+    expect(Math.abs(s(b) - s(b - 1e-6))).toBeLessThan(0.5);
+    expect(Math.abs(s(b + 1e-6) - s(b))).toBeLessThan(0.5);
+  });
+
+  test('a later linearDomain() re-enables the cap — focus is not sticky', () => {
+    const s = makeScale().focusDomain([500, 5000]);
+    expect(s.linearDomain()[1]).toBeCloseTo(5000, 3); // uncapped while focused
+    s.linearDomain([500, 5000]);                      // back on the capped path (pan/drag)
+    const [, ceil] = s.windowBounds();
+    expect(s.linearDomain()[1]).toBeLessThanOrEqual(ceil + 1e-6);
+    expect(s.linearDomain()[1]).toBeLessThan(5000);
+  });
+
+  test('focusDomain(null) restores the auto window', () => {
+    const s = makeScale();
+    const [aLo, aHi] = s.linearDomain();
+    s.focusDomain([500, 5000]);
+    s.focusDomain(null);
+    expect(s.linearDomain()[0]).toBeCloseTo(aLo, 3);
+    expect(s.linearDomain()[1]).toBeCloseTo(aHi, 3);
+  });
+
+  test('copy() preserves an uncapped focus', () => {
+    const s = makeScale().focusDomain([500, 5000]);
+    const c = s.copy();
+    expect(c.linearDomain()[0]).toBeCloseTo(500, 3);
+    expect(c.linearDomain()[1]).toBeCloseTo(5000, 3);
+  });
+});
+
 describe('d3 compatibility', () => {
   test('domain() getter returns current domain', () => {
     const s = makeScale();
