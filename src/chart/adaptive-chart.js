@@ -19,8 +19,11 @@ export function createAdaptiveChart(points, {
   xHi: xHiOverride,
   qLo: qLoOverride,    // explicit pixel fraction [0,1] for r1; undefined = use slider
   qHi: qHiOverride,    // explicit pixel fraction [0,1] for r2; undefined = use slider
+  focusXLo,            // uncapped focus window from the travel gesture (undefined = none)
+  focusXHi,
   onWindowDrag,        // callback({ xLo, xHi }) fired on every drag move (lightweight)
   onWindowChange,      // callback({ xLo, xHi, qLo?, qHi? }) fired on dragend (triggers re-render)
+  onTravel,            // callback({ xLo, xHi }) fired when a click/arrow travel completes
   ...options
 } = {}) {
   if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -31,7 +34,8 @@ export function createAdaptiveChart(points, {
     ? renderLog(points, { width, height, xFormat, ...options })
     : renderPiecewise(points, {
         width, height, window, xFormat,
-        xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
+        xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
+        onWindowDrag, onWindowChange, onTravel,
         ...options,
       });
 }
@@ -51,7 +55,8 @@ const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 
 function renderPiecewise(points, {
   width, height, window, xFormat,
-  xLoOverride, xHiOverride, qLoOverride, qHiOverride, onWindowDrag, onWindowChange,
+  xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
+  onWindowDrag, onWindowChange, onTravel,
   ...options
 }) {
   const innerW = width  - MARGIN.left - MARGIN.right;
@@ -73,6 +78,10 @@ function renderPiecewise(points, {
   if (qLoOverride != null && qHiOverride != null) {
     xScale.linearRange([innerW * qLoOverride, innerW * qHiOverride]);
   }
+  // An active travel ("focus") window is placed uncapped — exactly on a section's data.
+  if (focusXLo != null && focusXHi != null) {
+    xScale.focusDomain([focusXLo, focusXHi]);
+  }
 
   const [xLo, xHi] = xScale.linearDomain();
   const [r1, r2] = xScale.linearRange();
@@ -84,6 +93,9 @@ function renderPiecewise(points, {
   // Mutable window state the scale reads, so a drag can update the scale (and the axis)
   // in place. leftScale/midScale/rightScale are reassigned on drag too (see applyState).
   let currentXLo = xLo, currentXHi = xHi, currentR1 = r1, currentR2 = r2;
+  // When true, interaction places the window uncapped via focusDomain (the travel gesture);
+  // when false, the capped linearDomain path (pan/drag/auto). True if we loaded into a focus.
+  let useFocus = (focusXLo != null && focusXHi != null);
 
 
   // Held for redrawing the x-axis live on drag. Colour comes from CHART_CSS (.tick/.domain).
@@ -103,7 +115,7 @@ function renderPiecewise(points, {
       .attr('pointer-events', 'all')
       .attr('tabindex', '0')
       .attr('role', 'slider')
-      .attr('aria-label', 'Pan linear section — arrow keys to move, Shift for larger steps')
+      .attr('aria-label', 'Chart viewport — ←/→ travel between sections, Shift+←/→ to pan, double-click to reset')
       .style('outline', 'none')
     .lower();
 
@@ -112,7 +124,7 @@ function renderPiecewise(points, {
   // through the data; "scan the data" implies the whole range is reachable (push to an edge and
   // the window docks and keeps scrolling). It follows the window via positionPanHint() in
   // applyState, so it never gets left behind when you drag.
-  const HINT_TEXT = '← drag to scan the data →';
+  const HINT_TEXT = 'click a section · ←/→ to travel · double-click resets';
   const hintFontSize = 10, hintPadY = 4, hintPadX = 9;
   const hintH = hintFontSize + hintPadY * 2;
   const hintW = HINT_TEXT.length * 5.5 + hintPadX * 2;
@@ -362,7 +374,9 @@ function renderPiecewise(points, {
     const circles = g.selectAll('circle');
 
     function applyState(newXLo, newXHi, newR1, newR2) {
-      xScale.linearDomain([newXLo, newXHi]).linearRange([newR1, newR2]);
+      if (useFocus) xScale.focusDomain([newXLo, newXHi]);
+      else          xScale.linearDomain([newXLo, newXHi]);
+      xScale.linearRange([newR1, newR2]);
       const sub = xScale.subscales();
       leftScale = sub.leftScale;
       midScale = sub.midScale;
@@ -381,7 +395,71 @@ function renderPiecewise(points, {
       updateLinearAnnot(currentR1, currentR2, currentXLo, currentXHi);
       drawTailRuler(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
       drawTailRuler(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
+      rebuildTailOverlays();
       onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi });
+    }
+
+    // ── Travel overlays on the log tails ───────────────────────────────────────
+    // A transparent rect over each present tail. Hover tints it (the "clickable" affordance); a
+    // click travels the focus onto that section's data. Sits above the rulers (so the hover wash
+    // shows) but below the dots (tooltips still fire). The click does NOT stopPropagation, so a
+    // double-click still bubbles to the container's reset — a 250ms timer the dblclick cancels
+    // keeps that double-click from also firing a travel.
+    const tailG = g.append('g').attr('class', 'tail-overlays');
+    let travelClickTimer = null;
+    function scheduleTravel(lo, hi) {
+      if (travelClickTimer) clearTimeout(travelClickTimer);
+      travelClickTimer = setTimeout(() => { travelClickTimer = null; travelTo(lo, hi); }, 250);
+    }
+    function cancelScheduledTravel() {
+      if (travelClickTimer) { clearTimeout(travelClickTimer); travelClickTimer = null; }
+    }
+    function rebuildTailOverlays() {
+      const tails = [];
+      if (currentXLo > xMin + eps) tails.push({ side: 'left',  x0: r0,        x1: currentR1, lo: xMin,       hi: currentXLo });
+      if (currentXHi < xMax - eps) tails.push({ side: 'right', x0: currentR2, x1: r3,        lo: currentXHi, hi: xMax });
+      tailG.selectAll('rect.tail-overlay')
+        .data(tails, d => d.side)
+        .join(
+          // Static attrs + handlers on enter only — so a rebuild mid-interaction can't wipe the
+          // hover tint (fill-opacity is owned by the pointer handlers after creation).
+          enter => enter.append('rect')
+            .attr('class', d => `tail-overlay tail-${d.side}`)
+            .attr('y', 0).attr('height', innerH)
+            .attr('fill', 'var(--ruler-tint)')
+            .attr('fill-opacity', 0)
+            .attr('pointer-events', 'all')
+            .style('cursor', 'pointer')
+            .on('pointerenter', function () { select(this).attr('fill-opacity', 0.06); })
+            .on('pointerleave', function () { select(this).attr('fill-opacity', 0); })
+            .on('dblclick', cancelScheduledTravel),
+          update => update,
+        )
+        // Position + the per-render click target (lo/hi move as the window does) on enter AND update.
+        .attr('x', d => Math.min(d.x0, d.x1))
+        .attr('width', d => Math.max(0, Math.abs(d.x1 - d.x0)))
+        .on('click', (event, d) => scheduleTravel(d.lo, d.hi));
+    }
+
+    // Travel the focus onto the data inside [loBound, hiBound]: those points fill the linear
+    // section and the previously-focused data becomes a log tail. Shared by click and arrow keys.
+    function travelTo(loBound, hiBound) {
+      const inRange = xValues.filter(x => x >= loBound - eps && x <= hiBound + eps);
+      if (inRange.length === 0) return;
+      let [aLo, aHi] = extent(inRange);
+      if (!(aHi > aLo)) {                       // single point: pad so the focus has width
+        const pad = Math.max((xMax - xMin) * 1e-3, eps * 10);
+        aLo -= pad; aHi += pad;
+      }
+      // Destination geometry from a fresh focus scale — it picks the tail/focus pixel split.
+      const aim = scaleAdaptive().domain([xMin, xMax]).range([0, innerW])
+        .data(xValues).window(window).breakpointMethod('quantile')
+        .focusDomain([aLo, aHi]);
+      const [aimXLo, aimXHi] = aim.linearDomain();
+      const [aimR1,  aimR2 ] = aim.linearRange();
+      useFocus = true;
+      node.animateToWindow(aimXLo, aimXHi, aimR1, aimR2, { focus: true }, null,
+        () => onTravel?.({ xLo: aimXLo, xHi: aimXHi }));
     }
 
     // The boundary in dollars is read straight off the scale's own invert at the handle's
@@ -466,9 +544,10 @@ function renderPiecewise(points, {
     // accumulated scroll is folded into the domain so dragging back is seamless.
     const AUTO_GAIN = 0.12;          // overshoot px → fraction of a pan-step per ~frame
     const AUTO_MAX_OVERSHOOT = 120;  // cap so it can't scroll absurdly fast
-    // The window must stay within the scale's cap, not the raw data extremes — otherwise
-    // panning past the cap pushes both edges onto the bound and collapses the window.
-    const [panLo, panHi] = xScale.windowBounds();
+    // The window must stay within the scale's cap (capped mode), or the full data extremes when
+    // focused (uncapped travel) — otherwise panning past the bound collapses the window.
+    const panBounds = () => useFocus ? [xMin, xMax] : xScale.windowBounds();
+    let [panLo, panHi] = panBounds();
     let panStartX = 0, panStartR1 = r1, panStartXLo = xLo, panStartXHi = xHi;
     let panBoxW = r2 - r1, panRate = (xHi - xLo) / panBoxW;
     let panPointerX = 0, panAutoAccum = 0, panPrevElapsed = 0, panTimer = null;
@@ -494,6 +573,7 @@ function renderPiecewise(points, {
     overlay.call(drag()
       .on('start', event => {
         dragMoved = false;
+        [panLo, panHi] = panBounds();
         panStartX = event.x; panPointerX = event.x;
         panStartR1 = currentR1; panStartXLo = currentXLo; panStartXHi = currentXHi;
         panBoxW = currentR2 - currentR1; panRate = (currentXHi - currentXLo) / panBoxW;
@@ -524,6 +604,8 @@ function renderPiecewise(points, {
     // Dots sit above the handles so a point under a handle line still shows its tooltip on hover.
     // Points are tiny, so the full-height handle hit-line stays grabbable everywhere they aren't.
     g.select('g.dots').raise();
+
+    rebuildTailOverlays(); // initial travel overlays on the present tails
 
     const kbStep = event => event.shiftKey ? innerW * 0.02 : 5;
 
@@ -565,14 +647,24 @@ function renderPiecewise(points, {
     overlay.on('keydown', event => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
-      const dir   = event.key === 'ArrowRight' ? 1 : -1;
+      const dir = event.key === 'ArrowRight' ? 1 : -1;
+
+      // Plain arrow → travel onto the adjacent section (keyboard twin of clicking that tail).
+      if (!event.shiftKey) {
+        if (dir > 0 && currentXHi < xMax - eps) travelTo(currentXHi, xMax);
+        else if (dir < 0 && currentXLo > xMin + eps) travelTo(xMin, currentXLo);
+        return;
+      }
+
+      // Shift+arrow → fine pan (the original keyboard behaviour). Same cap handling as the mouse
+      // pan: clamp to the window bounds and shift as a unit so it parks at the bound with its
+      // width intact, instead of drifting past it.
+      [panLo, panHi] = panBounds();
       const boxW  = currentR2 - currentR1;
       const step  = kbStep(event);
       const panRate = (currentXHi - currentXLo) / boxW;
       const newR1 = Math.max(r0, Math.min(r3 - boxW, currentR1 + dir * step));
       const newR2 = newR1 + boxW;
-      // Same cap handling as the mouse pan: clamp to the window bounds and shift as a unit so
-      // arrow-key panning parks at the cap with its width intact, instead of drifting past it.
       let newXLo = currentXLo + dir * step * panRate;
       let newXHi = currentXHi + dir * step * panRate;
       if (newXLo < panLo) { newXHi -= (newXLo - panLo); newXLo = panLo; }
@@ -610,25 +702,25 @@ function renderPiecewise(points, {
     node.stopPan = () => {
       if (panTimer) { panTimer.stop(); panTimer = null; }
       if (kbCommit) { clearTimeout(kbCommit); kbCommit = null; }
+      cancelScheduledTravel();
     };
 
-    // Animated return to the auto (data-driven) window. Reset/double-click calls this instead
-    // of snapping: it tweens the linear window from wherever the user left it back to the
-    // quantile default, easing in and out, then hands control to onDone for the clean re-render.
+    // Window-travel animation. animateToWindow tweens from the current window to an explicit
+    // destination; focus:true keeps applyState on the uncapped focusDomain path for the whole
+    // tween (the click/arrow travel), focus:false lands on the capped path (reset). A new call
+    // cancels any in-flight tween, so a reset interrupts a travel and rapid travels re-target.
     let resetTimer = null;
-    node.animateToAuto = (targetWindow, onProgress, onDone) => {
+    node.animateToWindow = (aimXLo, aimXHi, aimR1, aimR2, { focus = false } = {}, onProgress, onDone) => {
       if (resetTimer) { resetTimer.stop(); resetTimer = null; }
-      // The destination is a fresh auto scale at the target slider: read its window back.
-      const aim = scaleAdaptive()
-        .domain([xMin, xMax]).range([0, innerW])
-        .data(xValues).window(targetWindow).breakpointMethod('quantile');
-      const [aimXLo, aimXHi] = aim.linearDomain();
-      const [aimR1,  aimR2 ] = aim.linearRange();
       const fromXLo = currentXLo, fromXHi = currentXHi, fromR1 = currentR1, fromR2 = currentR2;
       const DURATION = 650;
       resetTimer = timer(elapsed => {
         const t = Math.min(1, elapsed / DURATION);
         const e = easeCubicInOut(t);
+        // Interpolate uncapped between two known-good endpoints so the cap can't snap an out-of-cap
+        // start (a focused window). Settle into the real mode at the end: travel → stay focused
+        // (uncapped); reset → capped (the auto destination is in-cap, so its placement is identical).
+        useFocus = true;
         applyState(
           fromXLo + (aimXLo - fromXLo) * e,
           fromXHi + (aimXHi - fromXHi) * e,
@@ -636,7 +728,20 @@ function renderPiecewise(points, {
           fromR2  + (aimR2  - fromR2)  * e,
         );
         onProgress?.(e);
-        if (t >= 1) { resetTimer.stop(); resetTimer = null; onDone?.(); }
+        if (t >= 1) { resetTimer.stop(); resetTimer = null; useFocus = focus; onDone?.(); }
+      });
+    };
+
+    // Reset/double-click: tween back to the auto (capped) window at the target slider value.
+    node.animateToAuto = (targetWindow, onProgress, onDone) => {
+      const aim = scaleAdaptive()
+        .domain([xMin, xMax]).range([0, innerW])
+        .data(xValues).window(targetWindow).breakpointMethod('quantile');
+      const [aimXLo, aimXHi] = aim.linearDomain();
+      const [aimR1,  aimR2 ] = aim.linearRange();
+      node.animateToWindow(aimXLo, aimXHi, aimR1, aimR2, { focus: false }, onProgress, () => {
+        useFocus = false;
+        onDone?.();
       });
     };
   }

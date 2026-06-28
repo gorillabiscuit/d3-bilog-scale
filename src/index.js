@@ -19,6 +19,9 @@ let currentDataset = null;
 // Drag-handle overrides: null = use slider-derived defaults; set on dragend
 let manualXLo = null, manualXHi = null;
 let manualQLo = null, manualQHi = null;
+// Travel ("focus") window: an uncapped window placed exactly on a clicked/arrowed log section.
+// Null = not travelled. Kept separate from manual* so the capped and uncapped paths can't collide.
+let focusXLo = null, focusXHi = null;
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
 let userOverrodeTheme = false;
@@ -38,6 +41,7 @@ async function load(datasetKey) {
     status.textContent = `${currentDataset.points.length} points — ${currentDataset.description}`;
     manualXLo = null; manualXHi = null;
     manualQLo = null; manualQHi = null;
+    focusXLo = null; focusXHi = null;
     renderExperimental(true);
   } catch (err) {
     status.textContent = `Failed to load: ${err.message}`;
@@ -74,6 +78,8 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
     xHi: manualXHi ?? undefined,
     qLo: manualQLo ?? undefined,
     qHi: manualQHi ?? undefined,
+    focusXLo: focusXLo ?? undefined,
+    focusXHi: focusXHi ?? undefined,
     onWindowDrag: ({ xLo, xHi, qLo, qHi }) => {
       updateRangeDisplay(xLo, xHi, xFormat);
       if (qLo != null && qHi != null) {
@@ -83,15 +89,29 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
       }
     },
     onWindowChange: ({ xLo, xHi, qLo, qHi }) => {
-      manualXLo = xLo; manualXHi = xHi;
-      if (qLo != null) manualQLo = qLo;
-      if (qHi != null) manualQHi = qHi;
-      if (qLo != null && qHi != null) {
-        const w = qHi - qLo;
-        alphaSlider.value = w;
-        alphaValue.textContent = w.toFixed(2);
+      if (focusXLo != null) {
+        // Pan/drag while travelled stays in the uncapped focus — update it, not the capped window.
+        focusXLo = xLo; focusXHi = xHi;
+      } else {
+        manualXLo = xLo; manualXHi = xHi;
+        if (qLo != null) manualQLo = qLo;
+        if (qHi != null) manualQHi = qHi;
+        if (qLo != null && qHi != null) {
+          const w = qHi - qLo;
+          alphaSlider.value = w;
+          alphaValue.textContent = w.toFixed(2);
+        }
       }
       renderExperimental(false, true);
+    },
+    onTravel: ({ xLo, xHi }) => {
+      // A click/arrow travel completed (already animated in the chart). Persist the uncapped focus
+      // so it survives rebuilds (resize/slider/jitter); clear the capped overrides so they can't
+      // fight it. No re-render here — re-rendering now would replace the SVG mid-gesture and could
+      // swallow a following double-click; the next natural rebuild re-applies the focus cleanly.
+      focusXLo = xLo; focusXHi = xHi;
+      manualXLo = null; manualXHi = null; manualQLo = null; manualQHi = null;
+      updateRangeDisplay(xLo, xHi, xFormat);
     },
     xLabel, yLabel, xFormat, yFormat, yTicks, rankNoun: noun,
     // null  → skip simulation (jitter permanently off; setJitter will not be called)
@@ -191,12 +211,13 @@ function commitAutoView() {
   alphaValue.textContent = '0.50';
   manualXLo = null; manualXHi = null;
   manualQLo = null; manualQHi = null;
+  focusXLo = null; focusXHi = null;
   renderExperimental();
 }
 
 function resetScaleState() {
-  // No manual override (already auto) or no animated chart: just snap.
-  if ((manualXLo == null && manualQLo == null) || !chartNode?.animateToAuto) {
+  // No manual override / no travel (already auto), or no animated chart: just snap.
+  if ((manualXLo == null && manualQLo == null && focusXLo == null) || !chartNode?.animateToAuto) {
     commitAutoView();
     return;
   }
