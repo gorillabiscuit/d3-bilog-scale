@@ -9,23 +9,8 @@ import { axisBottom } from 'd3-axis';
 import { select } from 'd3-selection';
 import { createChart, MARGIN } from './chart/base-chart.js';
 import { makeFmt } from './utils/format.js';
+import { cleanLogTicks } from './utils/ticks.js';
 import { loadCryptoPunks2024 } from './data/loaders.js';
-
-// A log axis from d3 dumps every 1-9 minor tick per decade, which is far too dense. Reduce to the
-// conventional 1/2/5 mantissas and cull to ≥ 70px apart so the labels stay legible.
-function cleanLogTicks(scale) {
-  const onesTwosFives = scale.ticks().filter((t) => {
-    const m = t / Math.pow(10, Math.floor(Math.log10(t) + 1e-9));
-    return [1, 2, 5].some((k) => Math.abs(m - k) < 1e-6);
-  });
-  const kept = [];
-  let lastPx = -Infinity;
-  for (const t of onesTwosFives) {
-    const px = scale(t);
-    if (px - lastPx >= 70) { kept.push(t); lastPx = px; }
-  }
-  return kept;
-}
 
 const mode = new URLSearchParams(location.search).get('mode') === 'log' ? 'log' : 'linear';
 
