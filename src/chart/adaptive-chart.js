@@ -559,6 +559,9 @@ function renderPiecewise(points, {
     let leftHandle, rightHandle;
     // Set on the first move of any drag; a drag that never moves is a click (see end handlers).
     let dragMoved = false;
+    // A window tween (travel or reset) is in flight — gates arrow-repeat travel so holding the key
+    // steps one section per animation instead of re-targeting every key-repeat (which drifts).
+    let animating = false;
 
     // Pan: the box translates rigidly in pixel space; the domain follows at a uniform
     // dollar-per-pixel rate. When the pointer pushes past a chart edge the box docks and
@@ -673,8 +676,10 @@ function renderPiecewise(points, {
       const dir = event.key === 'ArrowRight' ? 1 : -1;
 
       // Plain arrow → step one window-width chunk into the adjacent tail (keyboard twin of clicking
-      // the chunk nearest the linear window).
+      // the chunk nearest the linear window). Ignore auto-repeats while a tween runs, so holding the
+      // key advances one section per animation rather than dragging the axis along.
       if (!event.shiftKey) {
+        if (animating) return;
         const W = currentXHi - currentXLo;
         if (dir > 0 && currentXHi < xMax - eps) travelTo(currentXHi, Math.min(currentXHi + W, xMax));
         else if (dir < 0 && currentXLo > xMin + eps) travelTo(Math.max(currentXLo - W, xMin), currentXLo);
@@ -737,6 +742,7 @@ function renderPiecewise(points, {
     let resetTimer = null;
     node.animateToWindow = (aimXLo, aimXHi, aimR1, aimR2, { focus = false } = {}, onProgress, onDone) => {
       if (resetTimer) { resetTimer.stop(); resetTimer = null; }
+      animating = true;
       const fromXLo = currentXLo, fromXHi = currentXHi, fromR1 = currentR1, fromR2 = currentR2;
       const DURATION = 650;
       resetTimer = timer(elapsed => {
@@ -753,7 +759,7 @@ function renderPiecewise(points, {
           fromR2  + (aimR2  - fromR2)  * e,
         );
         onProgress?.(e);
-        if (t >= 1) { resetTimer.stop(); resetTimer = null; useFocus = focus; onDone?.(); }
+        if (t >= 1) { resetTimer.stop(); resetTimer = null; animating = false; useFocus = focus; onDone?.(); }
       });
     };
 
