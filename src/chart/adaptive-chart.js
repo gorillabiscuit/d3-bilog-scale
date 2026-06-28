@@ -503,6 +503,11 @@ function renderPiecewise(points, {
       if (!(hiBound > loBound)) return;
       if (!chunkHasData([loBound, hiBound])) return;
       hideChunkHL();
+      // Clicking a tail-overlay rect (not focusable) blurs the pan-overlay, which owns the arrow
+      // keys, so after a click-travel the keyboard went dead until you clicked back into the linear
+      // section. Hand focus back to the overlay so click-travel stays keyboard-ready. A no-op for
+      // arrow-travel, where the overlay already holds focus.
+      overlay.node()?.focus({ preventScroll: true });
       // Destination geometry from a fresh focus scale — it picks the tail/focus pixel split.
       const aim = scaleAdaptive().domain([xMin, xMax]).range([0, innerW])
         .data(xValues).window(window).breakpointMethod('quantile')
