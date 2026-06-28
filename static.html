@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scale comparison — D3</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:                #1a1a2e;
+      --surface:           #16213e;
+      --border:            #2a2a5a;
+      --text:              #e0e0f0;
+      --text-muted:        #a0a0c0;
+      --text-faint:        #6060a0;
+      --accent:            #7070ff;
+      --dot-fill:          #7070ff;
+      --axis-color:        #3a3a6a;
+      --axis-text:         #a0a0c0;
+      --label-color:       #6060a0;
+      --tooltip-bg:        #0d1a33;
+      --tooltip-border:    #3a3a6a;
+      --tooltip-text:      #e0e0f0;
+      --tooltip-text-muted:#a0a0c0;
+      --ruler-tint:        #ffffff;
+      --chart-surface:     #16213e;
+    }
+    [data-theme="light"] {
+      --bg:                #f5f5fb;
+      --surface:           #ffffff;
+      --border:            #d0d0e8;
+      --text:              #1a1a2e;
+      --text-muted:        #5050a0;
+      --text-faint:        #9090b0;
+      --accent:            #4040cc;
+      --dot-fill:          #4040cc;
+      --axis-color:        #c0c0d8;
+      --axis-text:         #5050a0;
+      --label-color:       #8080b0;
+      --tooltip-bg:        #f0f0ff;
+      --tooltip-border:    #c0c0d8;
+      --tooltip-text:      #1a1a2e;
+      --tooltip-text-muted:#5050a0;
+      --ruler-tint:        #4040cc;
+      --chart-surface:     #ffffff;
+    }
+
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .chart-card {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .chart-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0 1rem;
+      height: 44px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      transition: border-color 0.2s;
+    }
+    .chart-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .toolbar-gap { flex: 1; min-width: 0.5rem; }
+
+    button {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.8rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.2s, color 0.2s;
+    }
+    button:hover { background: var(--border); }
+
+    .toggle-switch { display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer; user-select: none; }
+    .toggle-switch input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
+    .toggle-track { position: relative; width: 28px; height: 16px; background: var(--border); border-radius: 8px; flex-shrink: 0; transition: background 0.2s; }
+    .toggle-switch input:checked + .toggle-track { background: var(--accent); }
+    .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.28); transition: transform 0.2s cubic-bezier(0.4,0,0.2,1); }
+    .toggle-switch input:checked + .toggle-track .toggle-thumb { transform: translateX(12px); }
+    .toggle-label { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+
+    #chart { flex: 1; min-height: 0; position: relative; }
+  </style>
+</head>
+<body>
+  <div class="chart-card">
+    <div class="chart-toolbar">
+      <span class="chart-title" id="chart-title">Scale</span>
+      <div class="toolbar-gap"></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="jitter-toggle" checked>
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span class="toggle-label">Spread</span>
+      </label>
+      <button id="theme-toggle">☀ Light</button>
+    </div>
+    <div id="chart"></div>
+  </div>
+
+  <script type="module" src="/src/static.js"></script>
+</body>
+</html>
