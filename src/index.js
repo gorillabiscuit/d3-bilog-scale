@@ -43,6 +43,7 @@ async function load(datasetKey) {
     manualQLo = null; manualQHi = null;
     focusXLo = null; focusXHi = null;
     renderExperimental(true);
+    refocusGraph(); // hand focus back to the chart after a dataset change (no-op on first load)
   } catch (err) {
     status.textContent = `Failed to load: ${err.message}`;
     console.error(err);
@@ -157,6 +158,20 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
 
 // ── Event listeners ───────────────────────────────────────────────────────────
 
+// Track whether the chart held keyboard focus just before focus moved away (e.g. to a toolbar
+// control). A control-driven re-render replaces the SVG, and clicking the control already moved
+// focus off the chart, so arrow-key travel silently stops until the user clicks back in.
+// refocusGraph() hands focus back when the user had been driving the chart; the guard means we never
+// steal focus from a keyboard user who tabbed straight to a control. (The slider is left alone — its
+// drag must keep focus.)
+let graphWasFocused = false;
+document.addEventListener('focusout', (e) => {
+  graphWasFocused = !!e.target?.matches?.('.pan-overlay, .handle-left, .handle-right');
+}, true);
+function refocusGraph() {
+  if (graphWasFocused) chartNode?.querySelector('.pan-overlay')?.focus();
+}
+
 datasetSelector.addEventListener('change', e => load(e.target.value));
 
 let _raf = null;
@@ -185,6 +200,7 @@ jitterToggle.addEventListener('change', () => {
   } else {
     chartNode?.setJitter(false);
   }
+  refocusGraph(); // the toggle stole focus; keep arrow-key travel alive without a click back in
 });
 
 function applyTheme(theme) {
@@ -213,6 +229,7 @@ function commitAutoView() {
   manualQLo = null; manualQHi = null;
   focusXLo = null; focusXHi = null;
   renderExperimental();
+  refocusGraph(); // reset via the ↺ button moves focus to it; return it so arrows keep working
 }
 
 function resetScaleState() {
