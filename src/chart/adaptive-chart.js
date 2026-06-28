@@ -455,11 +455,17 @@ function renderPiecewise(points, {
       return [Math.max(currentXLo - (k + 1) * W, xMin), currentXLo - k * W];
     }
 
-    function highlightChunk(side, px) {
-      const chunk = chunkAt(side, px);
-      if (!chunk) { chunkHL.attr('fill-opacity', 0); return; }
+    // True if any data point falls inside the chunk [lo, hi]. Empty chunks aren't travel targets
+    // (travelTo no-ops them, nextChunkWithData skips them), so they get no hover feedback either.
+    const chunkHasData = ([lo, hi]) => xValues.some((x) => x >= lo - eps && x <= hi + eps);
+
+    // Position the hover highlight over a chunk and report whether it's a live target. A null or
+    // empty chunk hides the highlight and returns false (so the caller drops the pointer cursor too).
+    function showChunkHL(chunk) {
+      if (!chunk || !chunkHasData(chunk)) { chunkHL.attr('fill-opacity', 0); return false; }
       const a = xScale(chunk[0]), b = xScale(chunk[1]);
       chunkHL.attr('x', Math.min(a, b)).attr('width', Math.max(1, Math.abs(b - a))).attr('fill-opacity', 0.08);
+      return true;
     }
     const hideChunkHL = () => chunkHL.attr('fill-opacity', 0);
 
@@ -477,7 +483,10 @@ function renderPiecewise(points, {
             .attr('fill', 'transparent')
             .attr('pointer-events', 'all')
             .style('cursor', 'pointer')
-            .on('pointermove', (event, d) => highlightChunk(d.side, pointer(event, g.node())[0]))
+            .on('pointermove', (event, d) => {
+              const chunk = chunkAt(d.side, pointer(event, g.node())[0]);
+              event.currentTarget.style.cursor = showChunkHL(chunk) ? 'pointer' : 'default';
+            })
             .on('pointerleave', hideChunkHL)
             .on('click', (event, d) => { const c = chunkAt(d.side, pointer(event, g.node())[0]); if (c) scheduleTravel(c[0], c[1]); })
             .on('dblclick', cancelScheduledTravel),
@@ -492,7 +501,7 @@ function renderPiecewise(points, {
     // those points fill the linear section, the rest becomes log tails. No-op if the range is empty.
     function travelTo(loBound, hiBound) {
       if (!(hiBound > loBound)) return;
-      if (!xValues.some(x => x >= loBound - eps && x <= hiBound + eps)) return;
+      if (!chunkHasData([loBound, hiBound])) return;
       hideChunkHL();
       // Destination geometry from a fresh focus scale — it picks the tail/focus pixel split.
       const aim = scaleAdaptive().domain([xMin, xMax]).range([0, innerW])
