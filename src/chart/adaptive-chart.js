@@ -1,6 +1,6 @@
 import { scaleLog } from 'd3-scale';
 import { extent } from 'd3-array';
-import { select } from 'd3-selection';
+import { select, pointer } from 'd3-selection';
 import { drag } from 'd3-drag';
 import { axisBottom } from 'd3-axis';
 import { timer } from 'd3-timer';
@@ -400,12 +400,18 @@ function renderPiecewise(points, {
     }
 
     // ── Travel overlays on the log tails ───────────────────────────────────────
-    // A transparent rect over each present tail. Hover tints it (the "clickable" affordance); a
-    // click travels the focus onto that section's data. Sits above the rulers (so the hover wash
-    // shows) but below the dots (tooltips still fire). The click does NOT stopPropagation, so a
-    // double-click still bubbles to the container's reset — a 250ms timer the dblclick cancels
-    // keeps that double-click from also firing a travel.
+    // Each tail is tiled into linear-window-wide chunks (the same chunks drawTailRuler draws). A
+    // transparent rect per tail catches the pointer; hovering highlights the chunk under the cursor
+    // and clicking travels the focus onto JUST that chunk's range. Sits above the rulers (the wash
+    // shows) but below the dots (tooltips still fire). Click does NOT stopPropagation, so a
+    // double-click still bubbles to the container's reset — a 250ms timer the dblclick cancels keeps
+    // that double-click from also firing a travel.
     const tailG = g.append('g').attr('class', 'tail-overlays');
+    // The highlight that tracks the hovered chunk (pointer-events off so the catcher still gets clicks).
+    const chunkHL = tailG.append('rect').attr('class', 'tail-hover-chunk')
+      .attr('y', 0).attr('height', innerH)
+      .attr('fill', 'var(--ruler-tint)').attr('fill-opacity', 0)
+      .attr('pointer-events', 'none');
     let travelClickTimer = null;
     function scheduleTravel(lo, hi) {
       if (travelClickTimer) clearTimeout(travelClickTimer);
@@ -414,47 +420,64 @@ function renderPiecewise(points, {
     function cancelScheduledTravel() {
       if (travelClickTimer) { clearTimeout(travelClickTimer); travelClickTimer = null; }
     }
+
+    // The window-width chunk [lo,hi] of a tail under pixel px — W = linear-window width in DOLLARS,
+    // tiled outward from the linear edge (matching drawTailRuler's chunks). null if degenerate.
+    function chunkAt(side, px) {
+      const W = currentXHi - currentXLo;
+      if (!(W > 0)) return null;
+      const v = xScale.invert(px);
+      if (side === 'right') {
+        const k = Math.max(0, Math.floor((v - currentXHi) / W));
+        return [currentXHi + k * W, Math.min(currentXHi + (k + 1) * W, xMax)];
+      }
+      const k = Math.max(0, Math.floor((currentXLo - v) / W));
+      return [Math.max(currentXLo - (k + 1) * W, xMin), currentXLo - k * W];
+    }
+
+    function highlightChunk(side, px) {
+      const chunk = chunkAt(side, px);
+      if (!chunk) { chunkHL.attr('fill-opacity', 0); return; }
+      const a = xScale(chunk[0]), b = xScale(chunk[1]);
+      chunkHL.attr('x', Math.min(a, b)).attr('width', Math.max(1, Math.abs(b - a))).attr('fill-opacity', 0.08);
+    }
+    const hideChunkHL = () => chunkHL.attr('fill-opacity', 0);
+
     function rebuildTailOverlays() {
       const tails = [];
-      if (currentXLo > xMin + eps) tails.push({ side: 'left',  x0: r0,        x1: currentR1, lo: xMin,       hi: currentXLo });
-      if (currentXHi < xMax - eps) tails.push({ side: 'right', x0: currentR2, x1: r3,        lo: currentXHi, hi: xMax });
+      if (currentXLo > xMin + eps) tails.push({ side: 'left',  x0: r0,        x1: currentR1 });
+      if (currentXHi < xMax - eps) tails.push({ side: 'right', x0: currentR2, x1: r3 });
       tailG.selectAll('rect.tail-overlay')
         .data(tails, d => d.side)
         .join(
-          // Static attrs + handlers on enter only — so a rebuild mid-interaction can't wipe the
-          // hover tint (fill-opacity is owned by the pointer handlers after creation).
+          // Transparent pointer-catcher per tail; the visible feedback is chunkHL, positioned on move.
           enter => enter.append('rect')
             .attr('class', d => `tail-overlay tail-${d.side}`)
             .attr('y', 0).attr('height', innerH)
-            .attr('fill', 'var(--ruler-tint)')
-            .attr('fill-opacity', 0)
+            .attr('fill', 'transparent')
             .attr('pointer-events', 'all')
             .style('cursor', 'pointer')
-            .on('pointerenter', function () { select(this).attr('fill-opacity', 0.06); })
-            .on('pointerleave', function () { select(this).attr('fill-opacity', 0); })
+            .on('pointermove', (event, d) => highlightChunk(d.side, pointer(event, g.node())[0]))
+            .on('pointerleave', hideChunkHL)
+            .on('click', (event, d) => { const c = chunkAt(d.side, pointer(event, g.node())[0]); if (c) scheduleTravel(c[0], c[1]); })
             .on('dblclick', cancelScheduledTravel),
           update => update,
         )
-        // Position + the per-render click target (lo/hi move as the window does) on enter AND update.
         .attr('x', d => Math.min(d.x0, d.x1))
-        .attr('width', d => Math.max(0, Math.abs(d.x1 - d.x0)))
-        .on('click', (event, d) => scheduleTravel(d.lo, d.hi));
+        .attr('width', d => Math.max(0, Math.abs(d.x1 - d.x0)));
+      chunkHL.raise(); // keep the highlight above the (transparent) catchers
     }
 
-    // Travel the focus onto the data inside [loBound, hiBound]: those points fill the linear
-    // section and the previously-focused data becomes a log tail. Shared by click and arrow keys.
+    // Travel the focus onto [loBound, hiBound] exactly (a window-width chunk, or a keyboard step):
+    // those points fill the linear section, the rest becomes log tails. No-op if the range is empty.
     function travelTo(loBound, hiBound) {
-      const inRange = xValues.filter(x => x >= loBound - eps && x <= hiBound + eps);
-      if (inRange.length === 0) return;
-      let [aLo, aHi] = extent(inRange);
-      if (!(aHi > aLo)) {                       // single point: pad so the focus has width
-        const pad = Math.max((xMax - xMin) * 1e-3, eps * 10);
-        aLo -= pad; aHi += pad;
-      }
+      if (!(hiBound > loBound)) return;
+      if (!xValues.some(x => x >= loBound - eps && x <= hiBound + eps)) return;
+      hideChunkHL();
       // Destination geometry from a fresh focus scale — it picks the tail/focus pixel split.
       const aim = scaleAdaptive().domain([xMin, xMax]).range([0, innerW])
         .data(xValues).window(window).breakpointMethod('quantile')
-        .focusDomain([aLo, aHi]);
+        .focusDomain([loBound, hiBound]);
       const [aimXLo, aimXHi] = aim.linearDomain();
       const [aimR1,  aimR2 ] = aim.linearRange();
       useFocus = true;
@@ -649,10 +672,12 @@ function renderPiecewise(points, {
       event.preventDefault();
       const dir = event.key === 'ArrowRight' ? 1 : -1;
 
-      // Plain arrow → travel onto the adjacent section (keyboard twin of clicking that tail).
+      // Plain arrow → step one window-width chunk into the adjacent tail (keyboard twin of clicking
+      // the chunk nearest the linear window).
       if (!event.shiftKey) {
-        if (dir > 0 && currentXHi < xMax - eps) travelTo(currentXHi, xMax);
-        else if (dir < 0 && currentXLo > xMin + eps) travelTo(xMin, currentXLo);
+        const W = currentXHi - currentXLo;
+        if (dir > 0 && currentXHi < xMax - eps) travelTo(currentXHi, Math.min(currentXHi + W, xMax));
+        else if (dir < 0 && currentXLo > xMin + eps) travelTo(Math.max(currentXLo - W, xMin), currentXLo);
         return;
       }
 
