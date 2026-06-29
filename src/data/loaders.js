@@ -6,33 +6,15 @@ import { csvParse } from 'd3-dsv';
 // label = the point's identity (shown first in the tooltip); meta = a short secondary line;
 // noun = the plural the tooltip's percentile line reads ("bigger than 98% of <noun>").
 
-const titleCase = (s) =>
-  (s || '').toLowerCase().replace(/\b([a-z])/g, (_, c) => c.toUpperCase()).trim();
-
 const joinMeta = (...parts) => parts.filter(Boolean).join(' · ');
 
 export async function loadUSGS() {
-  const url =
-    'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson' +
-    '&minmagnitude=1&limit=500&orderby=time';
-  const res = await fetch(url);
-  const json = await res.json();
-  const points = json.features
-    .map((f) => {
-      const p = f.properties;
-      return {
-        // Derive energy from magnitude so the outlier distortion is visible on a linear scale.
-        // Energy ∝ 10^(1.5 * mag), normalised to mag-1 baseline so values start near 1.
-        x: Math.pow(10, 1.5 * p.mag) / Math.pow(10, 1.5),
-        y: f.geometry.coordinates[2], // depth in km
-        label: p.place || p.title || 'Unknown location',
-        meta: joinMeta(
-          Number.isFinite(p.mag) ? `M ${p.mag.toFixed(1)}` : null,
-          p.type && p.type !== 'earthquake' ? p.type : null,
-          p.tsunami ? 'tsunami' : null,
-        ),
-      };
-    })
+  // Frozen snapshot of the USGS earthquake feed (earthquake.usgs.gov), captured 2026-06-29 — no live
+  // dependency. x is energy derived from magnitude (∝ 10^(1.5·mag), mag-1 = 1); the rest is as pulled.
+  const res = await fetch(import.meta.env.BASE_URL + 'data/usgs-sample.csv');
+  const text = await res.text();
+  const points = csvParse(text)
+    .map((r) => ({ x: +r.x, y: +r.y, label: r.label, meta: r.meta }))
     .filter((p) => p.x > 0 && Number.isFinite(p.y));
   return {
     points,
@@ -47,29 +29,14 @@ export async function loadUSGS() {
 }
 
 export async function loadNYC() {
-  // NYC Open Data Socrata API — rolling property sales, no auth required.
-  // No ORDER BY — default insertion order gives a representative mix of cheap
-  // deed transfers ($10) through trophy sales ($1B+), which is exactly the
-  // two-sided distribution we want to demonstrate.
-  const url =
-    'https://data.cityofnewyork.us/resource/usep-8jbt.json' +
-    '?$limit=800&$where=sale_price>0';
-  const res = await fetch(url);
-  const json = await res.json();
-  const points = json
-    .map((r) => {
-      const price = Number(r.sale_price);
-      const sqft  = Number(r.gross_square_feet);
-      const hood  = titleCase(r.neighborhood);
-      const type  = titleCase((r.building_class_category || '').replace(/^\d+\s+/, ''));
-      return {
-        x: price,
-        y: sqft > 0 ? price / sqft : null,
-        label: titleCase(r.address) || hood || 'NYC sale',
-        meta: joinMeta(hood, type),
-      };
-    })
-    .filter((p) => p.x >= 1 && p.y !== null && Number.isFinite(p.x) && Number.isFinite(p.y));
+  // Frozen snapshot of NYC Open Data rolling property sales (data.cityofnewyork.us), captured
+  // 2026-06-29 — no live dependency. The live feed has no ORDER BY, so this pins one representative
+  // pull: cheap deed transfers far below residential prices, trophy deals far above.
+  const res = await fetch(import.meta.env.BASE_URL + 'data/nyc-sample.csv');
+  const text = await res.text();
+  const points = csvParse(text)
+    .map((r) => ({ x: +r.x, y: +r.y, label: r.label, meta: r.meta }))
+    .filter((p) => p.x >= 1 && Number.isFinite(p.x) && Number.isFinite(p.y));
   return {
     points,
     xLabel: 'Sale price (USD)',
@@ -230,21 +197,13 @@ export async function loadCryptoPunks2024() {
 }
 
 export async function loadOpenAlex() {
-  // OpenAlex REST API — top cited works, no auth (add email for polite pool)
-  const url =
-    'https://api.openalex.org/works?sort=cited_by_count:desc&per-page=200' +
-    '&filter=type:article&mailto=wschreuders@gmail.com';
-  const res = await fetch(url);
-  const json = await res.json();
-  const points = json.results.map((w) => ({
-    x: w.cited_by_count,
-    y: w.publication_year,
-    label: w.display_name || w.title || 'Untitled',
-    meta: joinMeta(
-      w.authorships?.[0]?.author?.display_name,
-      w.primary_location?.source?.display_name,
-    ),
-  }));
+  // Frozen snapshot of OpenAlex top-cited works (api.openalex.org), captured 2026-06-29 — no live
+  // dependency. x = citation count, y = publication year.
+  const res = await fetch(import.meta.env.BASE_URL + 'data/openalex-sample.csv');
+  const text = await res.text();
+  const points = csvParse(text)
+    .map((r) => ({ x: +r.x, y: +r.y, label: r.label, meta: r.meta }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   return {
     points,
     xLabel: 'Citation count',
