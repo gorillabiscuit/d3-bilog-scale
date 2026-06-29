@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hatch-density experiment — NYC Property Sales</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #16213e;
+      color: #e0e0f0;
+      font-family: 'Inter', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #chart-wrap {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+
+    #chart-adaptive {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="chart-wrap">
+    <div id="chart-adaptive" class="chart-container"></div>
+  </div>
+
+  <script type="module" src="/hatch-embed.js"></script>
+</body>
+</html>
