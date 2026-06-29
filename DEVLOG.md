@@ -4,6 +4,7 @@ Decision log for the article. Timestamped one-liners only.
 
 ---
 
+- **[11:20]** Built focused hatch embed (hatch-embed.html + hatch-embed.js) from figure/hatch-experiment, pinned to NYC CSV snapshot — no live data deps, wired as live iframe in article replacing the placeholder.
 - **[14:30]** Rejected uniform hatch lines across entire log tail: it recreates the bunched-lines look at 45° and communicates nothing new about per-region compression.
 - **[14:35]** Redesigned hatch texture to per-band density encoding: each equal-dollar-step section gets its own SVG `<pattern>` whose line spacing scales with that band's pixel width relative to the widest band in the tail — widest band = sparsest hatch (8px), narrower = denser, sub-1px = solid fill.
 - **[14:40]** Key insight that forced relative normalisation: absolute normalisation against linearW caused all bands to fall below the solid-fill threshold on datasets with highly-compressed tails (NYC property data: first right-tail band only 11.5px vs 113px linear window, giving 1.2px spacing before any pattern renders).
