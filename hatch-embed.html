@@ -9,11 +9,21 @@
 
     html, body {
       height: 100%;
-      background: #16213e;
-      color: #e0e0f0;
+      background: var(--embed-bg, #16213e);
+      color: var(--embed-text, #e0e0f0);
       font-family: 'Inter', system-ui, sans-serif;
       display: flex;
       flex-direction: column;
+    }
+
+    [data-theme="dark"] {
+      --embed-bg: #16213e;
+      --embed-text: #e0e0f0;
+    }
+
+    [data-theme="light"] {
+      --embed-bg: #ffffff;
+      --embed-text: #1a1a2e;
     }
 
     #chart-wrap {

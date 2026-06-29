@@ -1,21 +1,40 @@
 import { csvParse } from 'd3-dsv';
 import { createAdaptiveChart } from './src/chart/adaptive-chart.js';
-import { windowQuantile } from './src/scale/window.js';
 import { registerSvgSaveShortcut } from './src/save-svg.js';
 
-const THEME = {
-  dotColor:        '#7070ff',
-  axisColor:       '#3a3a6a',
-  axisTextColor:   '#a0a0c0',
-  labelColor:      '#6060a0',
-  tooltipBg:       '#0d1a33',
-  tooltipBorder:   '#3a3a6a',
-  tooltipTextColor:'#e0e0f0',
-  tooltipTextMuted:'#a0a0c0',
-  overlayColor:    'white',
-  tickColor:       'white',
-  chartBg:         '#16213e',
+const THEMES = {
+  dark: {
+    dotColor:        '#7070ff',
+    axisColor:       '#3a3a6a',
+    axisTextColor:   '#a0a0c0',
+    labelColor:      '#6060a0',
+    tooltipBg:       '#0d1a33',
+    tooltipBorder:   '#3a3a6a',
+    tooltipTextColor:'#e0e0f0',
+    tooltipTextMuted:'#a0a0c0',
+    overlayColor:    'white',
+    tickColor:       'white',
+    chartBg:         '#16213e',
+  },
+  light: {
+    dotColor:        '#4040cc',
+    axisColor:       '#c0c0d8',
+    axisTextColor:   '#5050a0',
+    labelColor:      '#8080b0',
+    tooltipBg:       '#f0f0ff',
+    tooltipBorder:   '#c0c0d8',
+    tooltipTextColor:'#1a1a2e',
+    tooltipTextMuted:'#5050a0',
+    overlayColor:    '#4040cc',
+    tickColor:       '#4040cc',
+    chartBg:         '#ffffff',
+  },
 };
+
+// Read ?theme= URL param; fall back to dark.
+const urlTheme = new URLSearchParams(window.location.search).get('theme');
+const themeName = urlTheme === 'light' ? 'light' : 'dark';
+document.documentElement.setAttribute('data-theme', themeName);
 
 let points = [];
 let manualXLo = null, manualXHi = null;
@@ -55,7 +74,7 @@ function render() {
     yFormat: 'currency',
     tailTicks: 6,
     showLocalRate: true,
-    ...THEME,
+    ...THEMES[themeName],
   });
   container.replaceChildren(el);
   chartNode = el;
@@ -71,7 +90,7 @@ ro.observe(document.getElementById('chart-adaptive'));
 registerSvgSaveShortcut(
   () => chartNode,
   () => 'hatch-nyc',
-  () => THEME.chartBg,
+  () => THEMES[themeName].chartBg,
 );
 
 init();
