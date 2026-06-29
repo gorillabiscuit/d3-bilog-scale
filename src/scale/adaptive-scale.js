@@ -155,12 +155,13 @@ export function scaleAdaptive() {
     // Determine range boundaries (r1, r2)
     let p1, p2;
     if (_r1Override != null && _r2Override != null) {
-      // An absent tail gets no pixels even under an explicit override, so the linear region
-      // extends to the chart edge instead of leaving a degenerate strip behind. The boundary
-      // renders exactly at the override pixel so invert(p1) === currentXLo holds — interaction
-      // code (handle drag) sets xLo = invert(cursor) and relies on that round-trip.
-      p1 = hasLeft ? _r1Override : rMin;
-      p2 = hasRight ? _r2Override : rMax;
+      // Honor the user's dragged position unconditionally. When a tail is absent the window
+      // stays exactly where the user left it; the empty space beside it stays blank rather
+      // than snapping the window to the chart edge. The degenerate tail scale that rebuild()
+      // creates below for an absent tail is guarded by hasLeft/hasRight in scale()/invert(),
+      // so it is never actually called.
+      p1 = _r1Override;
+      p2 = _r2Override;
     } else {
       const qLo = hasLeft ? Math.max(0, 0.5 - _window / 2) : 0;
       const qHi = hasRight ? Math.min(1, 0.5 + _window / 2) : 1;

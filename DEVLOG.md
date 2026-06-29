@@ -2,6 +2,8 @@
 
 Decision log for the article. Timestamped one-liners only.
 
+- **[14:25]** Fixed empty-linear-section pan snap: on compact datasets (<1.5 decades, no windowCap) the user could pan to a tail-vanish extreme and the `_r1Override` was discarded in favour of rMin/rMax — window snapped to the chart edge. Fix: always honour the explicit override; the empty space beside the window stays blank rather than pulling the window to the edge. 77 tests green.
+
 ---
 
 - **[11:20]** Built focused hatch embed (hatch-embed.html + hatch-embed.js) from figure/hatch-experiment, pinned to NYC CSV snapshot — no live data deps, wired as live iframe in article replacing the placeholder.
