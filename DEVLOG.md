@@ -2,6 +2,11 @@
 
 Decision log for the article. Timestamped one-liners only.
 
+- **[21:00]** Built an explicit Observable premium-submission rubric (d3-scale contract, Bostock chart conventions, parameter exposure, packaging) and audited the codebase against it — core math passed, API surface failed: no accessors, hardcoded margins/breakpoint method, no README.
+- **[21:05]** Completed the d3 scale contract: nice(), unknown(), and scaleAdaptive(domain, range) constructor args — the three missing conventions vs native continuous scales.
+- **[21:15]** Reshaped the chart to the Bostock accessor pattern (x/y/label/meta options, data of any shape) rather than requiring pre-shaped {x,y} points — the single biggest reusability gap in the audit.
+- **[21:20]** Renamed jitter → spread across the API to match the UI label and spreadSeed/spreadOffsets naming; exposed breakpointMethod, margins, minWindowPx, tail tint ramp and rulerMinPx as options with unchanged defaults.
+- **[21:30]** Wrote the README/API reference — scale contract table, chart options with defaults, interaction model, the four invariants.
 - **[14:25]** Fixed empty-linear-section pan snap: on compact datasets (<1.5 decades, no windowCap) the user could pan to a tail-vanish extreme and the `_r1Override` was discarded in favour of rMin/rMax — window snapped to the chart edge. Fix: always honour the explicit override; the empty space beside the window stays blank rather than pulling the window to the edge. 77 tests green.
 
 ---
