@@ -11,8 +11,10 @@ import { detectScaleType } from '../scale/detect.js';
 import { scaleAdaptive } from '../scale/adaptive-scale.js';
 
 export function createAdaptiveChart(points, {
+  x = d => d.x,         // accessor for the adaptively-scaled (skewed) variable
   width = 900, height = 260,
   windowFraction = 0.5, // slider tightness [0,1]; named to avoid shadowing globalThis.window
+  breakpointMethod = 'quantile', // 'quantile' | 'iqr' | 'log-iqr' | 'percentile' — see scaleAdaptive
   xFormat = '~s',
   mode,
   xLo: xLoOverride,    // explicit boundary from drag handles; undefined = use windowQuantile
@@ -26,14 +28,29 @@ export function createAdaptiveChart(points, {
   onTravel,            // callback({ xLo, xHi }) fired when a click/arrow travel completes
   ...options
 } = {}) {
-  if (!points?.length) return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  if (!points?.length) {
+    // A sized, classed placeholder — an unsized bare <svg> renders as an invisible
+    // 300×150 default box in an Observable cell bound to an empty data input.
+    const empty = select(document.createElementNS('http://www.w3.org/2000/svg', 'svg'))
+      .attr('class', 'chart')
+      .attr('viewBox', [0, 0, width, height])
+      .style('width', '100%')
+      .style('height', '100%');
+    empty.append('text')
+      .attr('x', width / 2).attr('y', height / 2)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'currentColor').attr('fill-opacity', 0.4)
+      .attr('font-size', '11px')
+      .text('no data');
+    return empty.node();
+  }
 
-  const resolvedMode = mode ?? detectScaleType(points.map(d => d.x));
+  const resolvedMode = mode ?? detectScaleType(points.map(x));
 
   return resolvedMode === 'log'
-    ? renderLog(points, { width, height, xFormat, ...options })
+    ? renderLog(points, { x, width, height, xFormat, ...options })
     : renderPiecewise(points, {
-        width, height, windowFraction, xFormat,
+        x, width, height, windowFraction, breakpointMethod, xFormat,
         xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
         onWindowDrag, onWindowChange, onTravel,
         ...options,
@@ -42,27 +59,37 @@ export function createAdaptiveChart(points, {
 
 // ── Log mode ──────────────────────────────────────────────────────────────────
 
-function renderLog(points, { width, height, xFormat, ...options }) {
-  const [xMin, xMax] = extent(points, d => d.x);
-  const innerW = width  - MARGIN.left - MARGIN.right;
+function renderLog(points, { x, width, height, xFormat, ...options }) {
+  const marginLeft = options.marginLeft ?? MARGIN.left;
+  const marginRight = options.marginRight ?? MARGIN.right;
+  const [xMin, xMax] = extent(points, x);
+  const innerW = width - marginLeft - marginRight;
   const xScale = scaleLog().domain([xMin, xMax]).range([0, innerW]).nice();
-  return createChart(points, xScale, { width, height, xFormat, ...options });
+  return createChart(points, xScale, { x, width, height, xFormat, ...options });
 }
 
 // ── Piecewise mode ────────────────────────────────────────────────────────────
 
-const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
-
 function renderPiecewise(points, {
-  width, height, windowFraction, xFormat,
+  x, width, height, windowFraction, breakpointMethod, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
   onWindowDrag, onWindowChange, onTravel,
+  minWindowPx = 20,     // minimum pixel width the linear region can be dragged down to
+  showHint = true,      // the fading "click a section · ←/→ to travel" badge on first render
+  tailTintBase = 0.02,  // fill opacity of the first (innermost) tail chunk
+  tailTintStep = 0.012, // opacity added per chunk outward
+  tailTintMax = 0.10,   // tint ceiling
+  rulerMinPx = 2,       // tail chunk narrower than this stops the ruler (density cap)
   ...options
 }) {
-  const innerW = width  - MARGIN.left - MARGIN.right;
-  const innerH = height - MARGIN.top  - MARGIN.bottom;
-  const [xMin, xMax] = extent(points, d => d.x);
-  const xValues = points.map(d => d.x);
+  const marginLeft = options.marginLeft ?? MARGIN.left;
+  const marginRight = options.marginRight ?? MARGIN.right;
+  const marginTop = options.marginTop ?? MARGIN.top;
+  const marginBottom = options.marginBottom ?? MARGIN.bottom;
+  const innerW = width  - marginLeft - marginRight;
+  const innerH = height - marginTop  - marginBottom;
+  const [xMin, xMax] = extent(points, x);
+  const xValues = points.map(x);
   const eps = (xMax - xMin) * 1e-9;
 
   const xScale = scaleAdaptive()
@@ -70,7 +97,7 @@ function renderPiecewise(points, {
     .range([0, innerW])
     .data(xValues)
     .window(windowFraction)
-    .breakpointMethod('quantile'); // Use quantile matching chart slider
+    .breakpointMethod(breakpointMethod);
 
   if (xLoOverride != null && xHiOverride != null) {
     xScale.linearDomain([xLoOverride, xHiOverride]);
@@ -101,7 +128,7 @@ function renderPiecewise(points, {
   // Held for redrawing the x-axis live on drag. Colour comes from CHART_CSS (.tick/.domain).
   const xFmt = makeFmt(xFormat);
 
-  const node = createChart(points, xScale, { width, height, xFormat, ...options });
+  const node = createChart(points, xScale, { x, width, height, xFormat, ...options });
   const g = select(node).select('g');
 
   // Overlay on linear region — lowered below dots so dots still get pointer
@@ -130,31 +157,38 @@ function renderPiecewise(points, {
   const hintW = HINT_TEXT.length * 5.5 + hintPadX * 2;
   const hintCy = innerH - hintH / 2 - 4;
 
-  const panHintG = g.append('g').attr('pointer-events', 'none').style('opacity', 0.9);
-  panHintG.append('rect')
-    .attr('class', 'pan-hint-bg')
-    .attr('x', -hintW / 2).attr('y', -hintH / 2)
-    .attr('width', hintW).attr('height', hintH).attr('rx', hintH / 2)
-    .attr('fill-opacity', 0.12)
-    .attr('stroke-opacity', 0.3).attr('stroke-width', 1);
-  panHintG.append('text')
-    .attr('class', 'pan-hint-text')
-    .attr('y', hintFontSize * 0.35)
-    .attr('text-anchor', 'middle')
-    .attr('fill-opacity', 0.65)
-    .attr('font-size', `${hintFontSize}px`)
-    .text(HINT_TEXT);
+  const panHintG = showHint
+    ? g.append('g').attr('pointer-events', 'none').style('opacity', 0.9)
+    : select(null);
+  if (showHint) {
+    panHintG.append('rect')
+      .attr('class', 'pan-hint-bg')
+      .attr('x', -hintW / 2).attr('y', -hintH / 2)
+      .attr('width', hintW).attr('height', hintH).attr('rx', hintH / 2)
+      .attr('fill-opacity', 0.12)
+      .attr('stroke-opacity', 0.3).attr('stroke-width', 1);
+    panHintG.append('text')
+      .attr('class', 'pan-hint-text')
+      .attr('y', hintFontSize * 0.35)
+      .attr('text-anchor', 'middle')
+      .attr('fill-opacity', 0.65)
+      .attr('font-size', `${hintFontSize}px`)
+      .text(HINT_TEXT);
+  }
 
-  // Re-centre the badge in the current window; safe to call after it has faded/removed (no-op).
+  // Re-centre the badge in the current window; a no-op once faded/removed or with showHint off
+  // (select(null) is an empty selection, so the attr call touches nothing).
   const positionPanHint = () =>
     panHintG.attr('transform', `translate(${(currentR1 + currentR2) / 2},${hintCy})`);
   positionPanHint();
 
-  panHintG.style('transition', 'opacity 0.8s');
-  setTimeout(() => {
-    panHintG.style('opacity', 0);
-    setTimeout(() => panHintG.remove(), 800);
-  }, 3000);
+  if (showHint) {
+    panHintG.style('transition', 'opacity 0.8s');
+    setTimeout(() => {
+      panHintG.style('opacity', 0);
+      setTimeout(() => panHintG.remove(), 800);
+    }, 3000);
+  }
 
   // ── Region annotations ────────────────────────────────────────────────────
   // Permanent dimension-line annotations: one per scale region, always visible.
@@ -198,9 +232,10 @@ function renderPiecewise(points, {
 
   const updateLinearAnnot = makeAnnotation('linear');
 
-  const TINT_BASE = 0.02;   // fill opacity of the first (innermost) arrow chunk
-  const TINT_STEP = 0.012;  // opacity added per chunk outward
-  const TINT_MAX  = 0.10;   // ceiling
+  // Tint ramp for the tail chunks — exposed as tailTintBase/Step/Max options.
+  const TINT_BASE = tailTintBase;
+  const TINT_STEP = tailTintStep;
+  const TINT_MAX  = tailTintMax;
 
   // Tail rulers replace the hatch. The linear window's dollar width W is tiled across
   // each log tail: every chunk spans the SAME W dollars, so the symlog renders them at
@@ -220,7 +255,7 @@ function renderPiecewise(points, {
   const RULER_HEAD   = 2.4;                // ~20% smaller heads → a couple more arrows fit
   const ARROW_MIN_PX = 2 * RULER_HEAD + 9; // ~14px: room for a ←→ arrow
   const TEXT_MIN_PX  = 20;                 // room for a stacked "log" / "×1" label
-  const RULER_MIN_PX = 2;                  // chunk narrower than this → stop (density cap)
+  const RULER_MIN_PX = rulerMinPx;         // chunk narrower than this → stop (density cap); option
   function drawTailRuler(grp, sub, boundary, extreme, W) {
     if (!(W > 0) || boundary === extreme) {
       grp.selectAll('*').remove();
@@ -279,8 +314,8 @@ function renderPiecewise(points, {
 
           const denseStart = outward > 0 ? sa + RULER_MIN_PX : sa;
           const denseEnd   = outward > 0 ? sb : sb - RULER_MIN_PX;
-          for (let x = denseStart; x <= denseEnd; x += RULER_MIN_PX) {
-            posts.push({ id: `dense-post-${x}`, x: x, opacity: 0.14 });
+          for (let px = denseStart; px <= denseEnd; px += RULER_MIN_PX) {
+            posts.push({ id: `dense-post-${px}`, x: px, opacity: 0.14 });
           }
         }
         arrows.push({ id: 'collapse-arrow', x1: a, x2: b, opacity: 0.65 });
@@ -510,7 +545,7 @@ function renderPiecewise(points, {
       overlay.node()?.focus({ preventScroll: true });
       // Destination geometry from a fresh focus scale — it picks the tail/focus pixel split.
       const aim = scaleAdaptive().domain([xMin, xMax]).range([0, innerW])
-        .data(xValues).window(windowFraction).breakpointMethod('quantile')
+        .data(xValues).window(windowFraction).breakpointMethod(breakpointMethod)
         .focusDomain([loBound, hiBound]);
       const [aimXLo, aimXHi] = aim.linearDomain();
       const [aimR1,  aimR2 ] = aim.linearRange();
@@ -686,7 +721,7 @@ function renderPiecewise(points, {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
       const dir = event.key === 'ArrowRight' ? 1 : -1;
-      const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, currentR1 + dir * kbStep(event)));
+      const px = Math.max(r0, Math.min(currentR2 - minWindowPx, currentR1 + dir * kbStep(event)));
       applyLeftDrag(px);
       leftHandle.attr('aria-valuenow', currentXLo);
       onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
@@ -697,7 +732,7 @@ function renderPiecewise(points, {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
       const dir = event.key === 'ArrowRight' ? 1 : -1;
-      const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, currentR2 + dir * kbStep(event)));
+      const px = Math.max(currentR1 + minWindowPx, Math.min(r3, currentR2 + dir * kbStep(event)));
       applyRightDrag(px);
       rightHandle.attr('aria-valuenow', currentXHi);
       onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
@@ -740,7 +775,7 @@ function renderPiecewise(points, {
     leftHandle.call(drag()
       .on('drag', event => {
         dragMoved = true;
-        const px = Math.max(r0, Math.min(currentR2 - MIN_WINDOW_PX, event.x));
+        const px = Math.max(r0, Math.min(currentR2 - minWindowPx, event.x));
         applyLeftDrag(px);
         onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
@@ -753,7 +788,7 @@ function renderPiecewise(points, {
     rightHandle.call(drag()
       .on('drag', event => {
         dragMoved = true;
-        const px = Math.max(currentR1 + MIN_WINDOW_PX, Math.min(r3, event.x));
+        const px = Math.max(currentR1 + minWindowPx, Math.min(r3, event.x));
         applyRightDrag(px);
         onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi, qLo: currentR1 / innerW, qHi: currentR2 / innerW });
       })
@@ -800,7 +835,7 @@ function renderPiecewise(points, {
     node.animateToAuto = (targetWindow, onProgress, onDone) => {
       const aim = scaleAdaptive()
         .domain([xMin, xMax]).range([0, innerW])
-        .data(xValues).window(targetWindow).breakpointMethod('quantile');
+        .data(xValues).window(targetWindow).breakpointMethod(breakpointMethod);
       const [aimXLo, aimXHi] = aim.linearDomain();
       const [aimR1,  aimR2 ] = aim.linearRange();
       node.animateToWindow(aimXLo, aimXHi, aimR1, aimR2, { focus: false }, onProgress, () => {

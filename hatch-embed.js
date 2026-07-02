@@ -72,9 +72,9 @@ function render() {
     yLabel: 'Price per sq ft (USD)',
     xFormat: 'currency',
     yFormat: 'currency',
-    tailTicks: 6,
-    showLocalRate: true,
-    ...THEMES[themeName],
+    spread: null, // dots at true positions — the embed has no spread toggle
+    // Chart colours come from the CSS custom properties in CHART_CSS (dark fallbacks built in);
+    // THEMES below only feeds the press-S SVG export background.
   });
   container.replaceChildren(el);
   chartNode = el;

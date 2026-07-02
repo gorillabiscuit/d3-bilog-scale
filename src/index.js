@@ -30,8 +30,8 @@ let focusQLo = null, focusQHi = null;
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
 let userOverrodeTheme = false;
 let currentTheme = systemDark.matches ? 'dark' : 'light';
-let jitterEnabled = true;
-let chartNode = null;       // current SVG element — setJitter() animates it in place
+let spreadEnabled = true;
+let chartNode = null;       // current SVG element — setSpread() animates it in place
 let _spreadGeneration = 0; // increments on every render; RAF checks it to avoid stale animations
 
 // ── Data loading ─────────────────────────────────────────────────────────────
@@ -68,8 +68,8 @@ function updateRangeDisplay(xLo, xHi, xFormat) {
 
 // ── Chart render ──────────────────────────────────────────────────────────────
 
-// entranceAnimation=true: dots render at true positions then spring to jittered
-// after first paint — used on new data loads. false: render at correct jitter
+// entranceAnimation=true: dots render at true positions then spring to the spread
+// after first paint — used on new data loads. false: render at correct spread
 // state instantly — used on re-renders from slider/drag so there's no lag.
 function renderExperimental(entranceAnimation = false, animateSpread = false) {
   if (!currentDataset) return;
@@ -121,7 +121,7 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
     },
     onTravel: ({ xLo, xHi }) => {
       // A click/arrow travel completed (already animated in the chart). Persist the uncapped focus
-      // so it survives rebuilds (resize/slider/jitter); clear the capped overrides so they can't
+      // so it survives rebuilds (resize/slider/spread); clear the capped overrides so they can't
       // fight it. No re-render here — re-rendering now would replace the SVG mid-gesture and could
       // swallow a following double-click; the next natural rebuild re-applies the focus cleanly.
       focusXLo = xLo; focusXHi = xHi;
@@ -130,13 +130,13 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
       updateRangeDisplay(xLo, xHi, xFormat);
     },
     xLabel, yLabel, xFormat, yFormat, yTicks, rankNoun: noun,
-    // null  → skip simulation (jitter permanently off; setJitter will not be called)
-    // false → run simulation, start at true positions (entrance animation; setJitter(true) fires after first paint)
+    // null  → skip simulation (spread permanently off; setSpread will not be called)
+    // false → run simulation, start at true positions (entrance animation; setSpread(true) fires after first paint)
     // true  → run simulation, start at spread positions
-    jitter: jitterEnabled ? (entranceAnimation ? false : true) : null,
+    spread: spreadEnabled ? (entranceAnimation ? false : true) : null,
     // Seed the new spread with the outgoing chart's settled offsets so dots keep their side of
     // the cluster across a re-render instead of re-rolling who-goes-up/who-goes-down (visible as
-    // dots swapping places on every handle release). Entrance renders (dataset load, jitter
+    // dots swapping places on every handle release). Entrance renders (dataset load, spread
     // re-enable) deliberately start fresh; base-chart also drops a seed whose length mismatches.
     spreadSeed: !entranceAnimation ? chartNode?.spreadOffsets : undefined,
   });
@@ -147,7 +147,7 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
   // snapping. Captured before replaceChildren destroys the old SVG.
   // Only the data dots (.dots circle) — NOT the handles' grip circles, which would shift the index
   // alignment and make each dot ease from a neighbour's old position.
-  const oldCy = (animateSpread && jitterEnabled && chartNode)
+  const oldCy = (animateSpread && spreadEnabled && chartNode)
     ? Array.from(chartNode.querySelectorAll('.dots circle')).map(c => +c.getAttribute('cy'))
     : null;
   // Preserve keyboard focus across the rebuild: a deferred keyboard-nudge commit replaces the
@@ -158,14 +158,14 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
   chartNode = el;
   if (focusSel) el.querySelector(focusSel)?.focus();
 
-  if (jitterEnabled && entranceAnimation) {
+  if (spreadEnabled && entranceAnimation) {
     // Two RAF calls: first frame paints the initial (true) positions, second
     // triggers the spring so the user sees dots settle in.
     // Generation guard: if another render fires before these RAFs execute
     // (e.g. rapid dataset switching), only the latest render should animate.
     const gen = ++_spreadGeneration;
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (_spreadGeneration === gen) chartNode?.setJitter(true, 700);
+      if (_spreadGeneration === gen) chartNode?.setSpread(true, 700);
     }));
   } else if (oldCy) {
     // Ease the recomputed spread from the outgoing positions. Run synchronously (before paint) so
@@ -212,13 +212,13 @@ alphaSlider.addEventListener('input', () => {
 });
 
 jitterToggle.addEventListener('change', () => {
-  jitterEnabled = jitterToggle.checked;
-  if (jitterEnabled) {
-    // Current chart was rendered with jitter:null (no simulation); need a full re-render
+  spreadEnabled = jitterToggle.checked;
+  if (spreadEnabled) {
+    // Current chart was rendered with spread:null (no simulation); need a full re-render
     // so spread positions are computed. Entrance animation gives the spring effect.
     renderExperimental(true);
   } else {
-    chartNode?.setJitter(false);
+    chartNode?.setSpread(false);
   }
   refocusGraph(); // the toggle stole focus; keep arrow-key travel alive without a click back in
 });

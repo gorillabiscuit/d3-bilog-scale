@@ -52,29 +52,41 @@ export const CHART_CSS = `
  * Returns svg.node() — caller is responsible for inserting it into the DOM.
  * This matches the Observable cell pattern: `chart = createChart(data, scale, {width})`.
  *
- * @param {Array<{x, y}>} points
- * @param {Function} xScale  D3-compatible scale, already ranged to [0, innerWidth]
+ * Data of any shape is accepted via the x/y/label/meta accessor options
+ * (defaults assume {x, y, label, meta} objects).
+ *
+ * @param {Array}    data     one datum per dot, any shape the accessors understand
+ * @param {Function} xScale   D3-compatible scale, already ranged to [0, innerWidth]
  * @param {Object}   options
  * @returns {SVGElement}
  */
-export function createChart(points, xScale, {
+export function createChart(data, xScale, {
+  x            = d => d.x,     // horizontal value accessor (the adaptively-scaled variable)
+  y            = d => d.y,     // vertical value accessor
+  label        = d => d.label, // tooltip headline accessor (nullish → line omitted)
+  meta         = d => d.meta,  // tooltip secondary-line accessor (nullish → line omitted)
   width        = 900,
   height       = 260,
+  marginTop    = MARGIN.top,
+  marginRight  = MARGIN.right,
+  marginBottom = MARGIN.bottom,
+  marginLeft   = MARGIN.left,
   xLabel       = 'x',
   yLabel       = 'y',
   xFormat      = '~s',
   yFormat      = '~s',
+  yType        = scaleLinear,  // d3 scale constructor for the y axis
   clipPadding,             // extra px around the plot area before clipping; defaults to dot radius
   rankNoun     = 'points', // plural noun for the tooltip's percentile line ("… of companies")
   dotRadius,               // undefined → auto-size by point count
   dotOpacity,              // undefined → auto-size by density
-  jitter       = false,    // y-only collision jitter — keeps x (the scale axis) exact
+  spread       = false,    // y-only collision spread — keeps x (the scale axis) exact
   spreadSeed,              // previous render's spread offsets (by index) — see jNodes init below
   yTicks       = 5,        // number of y-axis ticks; reduce for discrete datasets (e.g. year)
 } = {}) {
-  const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
-  const innerW = width  - mLeft - mRight;
-  const innerH = height - mTop  - mBot;
+  const points = data.map(d => ({ x: +x(d), y: +y(d), label: label(d), meta: meta(d) }));
+  const innerW = width  - marginLeft - marginRight;
+  const innerH = height - marginTop  - marginBottom;
   const clipId = `clip-${++_clipId}`;
   const r   = dotRadius  ?? (points.length > 500 ? 2 : 3);
   const pad = clipPadding ?? r;
@@ -84,7 +96,7 @@ export function createChart(points, xScale, {
   const [yMin, yMax] = extent(points, d => d.y);
   const yRange = yMax - yMin;
   const yPad = yRange * 0.05 || Math.abs(yMin) * 0.05 || 1;
-  const yScale = scaleLinear()
+  const yScale = yType()
     .domain([yMin - yPad, yMax + yPad]).nice()
     .range([innerH, 0]);
 
@@ -110,7 +122,7 @@ export function createChart(points, xScale, {
     .attr('height', innerH + 2 * pad);
 
   const g = svg.append('g')
-    .attr('transform', `translate(${mLeft},${mTop})`);
+    .attr('transform', `translate(${marginLeft},${marginTop})`);
 
   // ── x-axis ───────────────────────────────────────────────────────────────
   g.append('g')
@@ -160,10 +172,10 @@ export function createChart(points, xScale, {
       .attr('r', r)
       .attr('fill-opacity', autoOpacity);
 
-  // jitter: true  → run simulation, start at spread positions
-  // jitter: false → run simulation, start at true positions (entrance animation:
-  //                 caller will fire setJitter(true) after first paint)
-  // jitter: null  → skip simulation entirely; caller guarantees setJitter won't be called
+  // spread: true  → run simulation, start at spread positions
+  // spread: false → run simulation, start at true positions (entrance animation:
+  //                 caller will fire setSpread(true) after first paint)
+  // spread: null  → skip simulation entirely; caller guarantees setSpread won't be called
   //
   // spreadSeed carries the PREVIOUS render's settled offsets (y − cy0, by index — same dataset,
   // same order). Starting each node at its old offset makes the collision solver refine the
@@ -181,7 +193,7 @@ export function createChart(points, xScale, {
     density: 0,
   }));
 
-  if (jitter !== null) {
+  if (spread !== null) {
     // Count near-neighbours (O(n²), fast enough for ≤ 500 pts). A neighbour is any dot
     // whose true position is within 4 radii — close enough to compete for pixel space.
     const nbThresh2 = (4 * (r + 1)) ** 2;
@@ -225,7 +237,7 @@ export function createChart(points, xScale, {
       .tick(200);
   }
 
-  circles.attr('cy', (_, i) => jitter === true ? jNodes[i].y : jNodes[i].cy0);
+  circles.attr('cy', (_, i) => spread === true ? jNodes[i].y : jNodes[i].cy0);
 
   circles.on('pointerenter', function(event, d) {
       select(this).raise()
@@ -293,13 +305,13 @@ export function createChart(points, xScale, {
     .attr('font-size', '11px')
     .text(yLabel);
 
-  // Expose in-place jitter toggle — callers animate without rebuilding the SVG.
+  // Expose in-place spread toggle — callers animate without rebuilding the SVG.
   const svgNode = svg.node();
 
   // Settled spread offsets (y − cy0, by index) — feed back as spreadSeed on the next render of
   // the SAME dataset so the new simulation refines this arrangement instead of re-rolling it.
-  svgNode.spreadOffsets = jitter !== null ? jNodes.map(n => n.y - n.cy0) : null;
-  svgNode.setJitter = (enabled, duration = 500) => {
+  svgNode.spreadOffsets = spread !== null ? jNodes.map(n => n.y - n.cy0) : null;
+  svgNode.setSpread = (enabled, duration = 500) => {
     circles.transition()
       .duration(duration)
       .ease(enabled ? easeBackOut.overshoot(1.4) : easeCubicInOut)
@@ -312,7 +324,7 @@ export function createChart(points, xScale, {
   // where it now belongs instead of snapping. cy is set synchronously first (before paint) so there
   // is no one-frame flash at the new positions. easeCubicInOut keeps it quick and smooth (no bounce).
   svgNode.springSpreadFrom = (fromCy, duration = 320) => {
-    if (jitter === null || !fromCy) return;
+    if (spread === null || !fromCy) return;
     // Set the incoming positions synchronously (before paint, so there's no flash at the new
     // spread), then start the transition on the next frame. A transition created in the same
     // synchronous block as the freshly-inserted element jumps straight to its end; deferring one
