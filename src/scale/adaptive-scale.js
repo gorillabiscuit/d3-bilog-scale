@@ -42,13 +42,14 @@ export function symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope) 
   return scale;
 }
 
-export function scaleAdaptive() {
+export function scaleAdaptive(domain, range) {
   let _domain = [1, 100];
   let _range = [0, 1];
   let _data = [];
   let _window = 0.5; // slider fraction [0, 1]
   let _clamp = false;
   let _method = 'iqr'; // breakpoint detection method ('iqr' or 'quantile')
+  let _unknown; // scale(NaN/null/undefined) result — d3 convention, set via scale.unknown()
 
   // Manual overrides for domain & range boundaries (null = auto-detect)
   let _xLoOverride = null;
@@ -228,6 +229,7 @@ export function scaleAdaptive() {
   }
 
   function scale(v) {
+    if (v == null || Number.isNaN(v = +v)) return _unknown;
     if (_clamp) v = Math.max(_domain[0], Math.min(_domain[1], v));
     if (hasLeft && v <= currentXLo) return leftScale(v);
     if (hasRight && v >= currentXHi) return rightScale(v);
@@ -327,6 +329,24 @@ export function scaleAdaptive() {
     return scale;
   };
 
+  // d3 convention: the value returned for null/undefined/NaN input (default undefined).
+  scale.unknown = function (u) {
+    if (!arguments.length) return _unknown;
+    _unknown = u;
+    return scale;
+  };
+
+  // Extend the outer domain to round values, like every d3 continuous scale. Only the extremes
+  // move: the region boundaries (linear window, breakpoints) derive from the data and stay put;
+  // the symlog tails simply run out to the rounded extremes. No-op degenerate domains pass through.
+  scale.nice = function (count = 10) {
+    const [d0, d1] = _domain;
+    if (!(d1 > d0)) return scale;
+    _domain = scaleLinear().domain(_domain).nice(count).domain();
+    rebuild();
+    return scale;
+  };
+
   scale.breakpointMethod = function (m) {
     if (!arguments.length) return _method;
     _method = m;
@@ -375,6 +395,7 @@ export function scaleAdaptive() {
       .domain(_domain.slice())
       .range(_range.slice())
       .clamp(_clamp)
+      .unknown(_unknown)
       .window(_window)
       .breakpointMethod(_method);
     if (_xLoOverride != null) {
@@ -408,6 +429,11 @@ export function scaleAdaptive() {
   scale.windowBounds = windowCap;
 
   scale.type = 'adaptive';
+
+  // d3 v6+ convention: scaleAdaptive(range) or scaleAdaptive(domain, range), both optional.
+  if (range == null) { range = domain; domain = null; }
+  if (domain != null) _domain = [+domain[0], +domain[1]];
+  if (range != null) _range = [+range[0], +range[1]];
 
   rebuild();
   return scale;

@@ -298,6 +298,41 @@ describe('d3 compatibility', () => {
     expect(s(dMin - 100)).toBeCloseTo(s(dMin), 1);
     expect(s(dMax + 1000)).toBeCloseTo(s(dMax), 1);
   });
+
+  test('constructor accepts (domain, range) and (range) like d3 v6+ scales', () => {
+    const both = scaleAdaptive([5, 50], [0, 400]);
+    expect(both.domain()).toEqual([5, 50]);
+    expect(both.range()).toEqual([0, 400]);
+    const rangeOnly = scaleAdaptive([0, 400]);
+    expect(rangeOnly.range()).toEqual([0, 400]);
+    expect(rangeOnly.domain()).toEqual([1, 100]); // default domain untouched
+  });
+
+  test('unknown() controls the result for null/undefined/NaN input', () => {
+    const s = makeScale();
+    expect(s(NaN)).toBeUndefined();      // d3 default
+    expect(s(null)).toBeUndefined();
+    expect(s(undefined)).toBeUndefined();
+    s.unknown(-1);
+    expect(s(NaN)).toBe(-1);
+    expect(s.unknown()).toBe(-1);
+    expect(s.copy()(NaN)).toBe(-1);      // survives copy()
+    expect(Number.isFinite(s(50))).toBe(true); // real values unaffected
+  });
+
+  test('nice() extends the outer domain to round values without breaking monotonicity', () => {
+    const s = makeScale(); // data extent [2, 5000]
+    const [beforeLo, beforeHi] = s.domain();
+    s.nice();
+    const [lo, hi] = s.domain();
+    expect(lo).toBeLessThanOrEqual(beforeLo);
+    expect(hi).toBeGreaterThanOrEqual(beforeHi);
+    // still monotonic across the niced domain
+    const step = (hi - lo) / 200;
+    for (let v = lo; v < hi - step; v += step) {
+      expect(s(v)).toBeLessThan(s(v + step));
+    }
+  });
 });
 
 describe('ticks()', () => {
