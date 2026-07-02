@@ -22,6 +22,10 @@ let manualQLo = null, manualQHi = null;
 // Travel ("focus") window: an uncapped window placed exactly on a clicked/arrowed log section.
 // Null = not travelled. Kept separate from manual* so the capped and uncapped paths can't collide.
 let focusXLo = null, focusXHi = null;
+// Pixel position within a focused window, set only once the user drags/pans it — a fresh travel
+// leaves these null so the box centres itself in the new section (the intended arrival look);
+// null here (unlike focusXLo/XHi) means "let the scale centre it," not "not travelled."
+let focusQLo = null, focusQHi = null;
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
 let userOverrodeTheme = false;
@@ -42,6 +46,7 @@ async function load(datasetKey) {
     manualXLo = null; manualXHi = null;
     manualQLo = null; manualQHi = null;
     focusXLo = null; focusXHi = null;
+    focusQLo = null; focusQHi = null;
     renderExperimental(true);
     refocusGraph(); // hand focus back to the chart after a dataset change (no-op on first load)
   } catch (err) {
@@ -77,8 +82,11 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
     mode: 'piecewise', windowFraction: slider,
     xLo: manualXLo ?? undefined,
     xHi: manualXHi ?? undefined,
-    qLo: manualQLo ?? undefined,
-    qHi: manualQHi ?? undefined,
+    // manualQLo/QHi and focusQLo/QHi are mutually exclusive (only one mode is active at a time) —
+    // combine so a drag-while-focused's pixel position reaches the scale the same way a
+    // drag-while-capped's does.
+    qLo: (manualQLo ?? focusQLo) ?? undefined,
+    qHi: (manualQHi ?? focusQHi) ?? undefined,
     focusXLo: focusXLo ?? undefined,
     focusXHi: focusXHi ?? undefined,
     onWindowDrag: ({ xLo, xHi, qLo, qHi }) => {
@@ -92,7 +100,13 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
     onWindowChange: ({ xLo, xHi, qLo, qHi }) => {
       if (focusXLo != null) {
         // Pan/drag while travelled stays in the uncapped focus — update it, not the capped window.
+        // qLo/qHi (the pixel position) must persist here too, or the next render has a domain
+        // override with no matching pixel override and rebuild() falls back to centring the box
+        // via the window fraction — the domain moves to where you dragged, but the box "snaps"
+        // back to centre within it.
         focusXLo = xLo; focusXHi = xHi;
+        if (qLo != null) focusQLo = qLo;
+        if (qHi != null) focusQHi = qHi;
       } else {
         manualXLo = xLo; manualXHi = xHi;
         if (qLo != null) manualQLo = qLo;
@@ -111,6 +125,7 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
       // fight it. No re-render here — re-rendering now would replace the SVG mid-gesture and could
       // swallow a following double-click; the next natural rebuild re-applies the focus cleanly.
       focusXLo = xLo; focusXHi = xHi;
+      focusQLo = null; focusQHi = null; // fresh travel centres in the new section
       manualXLo = null; manualXHi = null; manualQLo = null; manualQHi = null;
       updateRangeDisplay(xLo, xHi, xFormat);
     },
@@ -228,6 +243,7 @@ function commitAutoView() {
   manualXLo = null; manualXHi = null;
   manualQLo = null; manualQHi = null;
   focusXLo = null; focusXHi = null;
+  focusQLo = null; focusQHi = null;
   renderExperimental();
   refocusGraph(); // reset via the ↺ button moves focus to it; return it so arrows keep working
 }
