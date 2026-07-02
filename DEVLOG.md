@@ -7,6 +7,7 @@ Decision log for the article. Timestamped one-liners only.
 - **[21:15]** Reshaped the chart to the Bostock accessor pattern (x/y/label/meta options, data of any shape) rather than requiring pre-shaped {x,y} points — the single biggest reusability gap in the audit.
 - **[21:20]** Renamed jitter → spread across the API to match the UI label and spreadSeed/spreadOffsets naming; exposed breakpointMethod, margins, minWindowPx, tail tint ramp and rulerMinPx as options with unchanged defaults.
 - **[21:30]** Wrote the README/API reference — scale contract table, chart options with defaults, interaction model, the four invariants.
+- **[21:50]** Generated the Observable submission package by script (imports → d3 namespace, multi-function modules block-wrapped into single-declaration cells) rather than by hand — then verified the transformed code: invariants re-run in node, chart rendered in-browser against real d3@7, every cell syntax-checked. Caught two transform bugs the tests exposed: a bare scaleLinear reference (yType default) and identifier rewriting clobbering a local named max.
 - **[14:25]** Fixed empty-linear-section pan snap: on compact datasets (<1.5 decades, no windowCap) the user could pan to a tail-vanish extreme and the `_r1Override` was discarded in favour of rMin/rMax — window snapped to the chart edge. Fix: always honour the explicit override; the empty space beside the window stays blank rather than pulling the window to the edge. 77 tests green.
 
 ---
