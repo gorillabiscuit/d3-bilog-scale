@@ -69,6 +69,7 @@ export function createChart(points, xScale, {
   dotRadius,               // undefined → auto-size by point count
   dotOpacity,              // undefined → auto-size by density
   jitter       = false,    // y-only collision jitter — keeps x (the scale axis) exact
+  spreadSeed,              // previous render's spread offsets (by index) — see jNodes init below
   yTicks       = 5,        // number of y-axis ticks; reduce for discrete datasets (e.g. year)
 } = {}) {
   const { top: mTop, right: mRight, bottom: mBot, left: mLeft } = MARGIN;
@@ -163,10 +164,19 @@ export function createChart(points, xScale, {
   // jitter: false → run simulation, start at true positions (entrance animation:
   //                 caller will fire setJitter(true) after first paint)
   // jitter: null  → skip simulation entirely; caller guarantees setJitter won't be called
-  const jNodes = points.map(d => ({
+  //
+  // spreadSeed carries the PREVIOUS render's settled offsets (y − cy0, by index — same dataset,
+  // same order). Starting each node at its old offset makes the collision solver refine the
+  // existing arrangement instead of re-deriving one from scratch: from a cold all-at-cy0 start,
+  // whether collide pushes a dot up or down hinges on sub-pixel overlap differences, so a small
+  // scale change (handle drag) flips assignments arbitrarily and dots visibly swap sides on
+  // every release. Seeded, they keep their side and just shift. Ignored on a dataset change
+  // (the caller drops the seed when the point count differs).
+  const seeded = Array.isArray(spreadSeed) && spreadSeed.length === points.length;
+  const jNodes = points.map((d, i) => ({
     fx:  xScale(d.x),
     x:   xScale(d.x),
-    y:   yScale(d.y),   // mutated by simulation → separated position; equals cy0 when skipped
+    y:   yScale(d.y) + (seeded ? spreadSeed[i] || 0 : 0), // sim start; equals cy0 when skipped
     cy0: yScale(d.y),   // true position (restoring target + toggle reference)
     density: 0,
   }));
@@ -205,6 +215,12 @@ export function createChart(points, xScale, {
         d => Math.max(0.05, 0.35 - (d.density / maxDensity) * 0.30)
       ))
       .force('wall', wallForce)
+      // Seeded runs start cool: at full alpha the restoring forceY collapses the seeded
+      // arrangement back into a pile within a few ticks and collide re-separates it from
+      // scratch — chaotically, defeating the seed. Collide moves nodes directly (not
+      // alpha-scaled), so a low-alpha pass still resolves the overlaps a scale change
+      // introduced while preserving which side of the cluster each dot settled on.
+      .alpha(seeded ? 0.12 : 1)
       .stop()
       .tick(200);
   }
@@ -279,6 +295,10 @@ export function createChart(points, xScale, {
 
   // Expose in-place jitter toggle — callers animate without rebuilding the SVG.
   const svgNode = svg.node();
+
+  // Settled spread offsets (y − cy0, by index) — feed back as spreadSeed on the next render of
+  // the SAME dataset so the new simulation refines this arrangement instead of re-rolling it.
+  svgNode.spreadOffsets = jitter !== null ? jNodes.map(n => n.y - n.cy0) : null;
   svgNode.setJitter = (enabled, duration = 500) => {
     circles.transition()
       .duration(duration)

@@ -134,6 +134,11 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
     // false → run simulation, start at true positions (entrance animation; setJitter(true) fires after first paint)
     // true  → run simulation, start at spread positions
     jitter: jitterEnabled ? (entranceAnimation ? false : true) : null,
+    // Seed the new spread with the outgoing chart's settled offsets so dots keep their side of
+    // the cluster across a re-render instead of re-rolling who-goes-up/who-goes-down (visible as
+    // dots swapping places on every handle release). Entrance renders (dataset load, jitter
+    // re-enable) deliberately start fresh; base-chart also drops a seed whose length mismatches.
+    spreadSeed: !entranceAnimation ? chartNode?.spreadOffsets : undefined,
   });
   // Stop any pan auto-scroll timer from the previous chart before tearing it down.
   chartNode?.stopPan?.();
