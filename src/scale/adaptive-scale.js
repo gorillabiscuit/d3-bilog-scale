@@ -25,8 +25,19 @@ export function symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope) 
   scale.invert     = px => boundary + outward * base.invert(px);
   scale.ticks      = n => base.ticks(n).map(d => boundary + outward * d);
   scale.tickFormat = (n, s) => base.tickFormat(n, s);
-  scale.domain     = () => outward > 0 ? [boundary, extreme] : [extreme, boundary];
-  scale.range      = () => outward > 0 ? [pBoundary, pExtreme] : [pExtreme, pBoundary];
+  // domain/range are fixed at construction — this scale IS the pair (boundary, extreme) anchored
+  // to (pBoundary, pExtreme); reconfiguring it in place would silently invalidate windowSlope and
+  // the boundary-continuity guarantee the parent scale relies on. Throw on the setter form rather
+  // than accepting arguments and quietly ignoring them — call copy() (or build a fresh tail) for a
+  // scale anchored elsewhere.
+  scale.domain = function (d) {
+    if (arguments.length) throw new Error('symlogTail: domain is fixed at construction; use copy() or build a new tail');
+    return outward > 0 ? [boundary, extreme] : [extreme, boundary];
+  };
+  scale.range = function (r) {
+    if (arguments.length) throw new Error('symlogTail: range is fixed at construction; use copy() or build a new tail');
+    return outward > 0 ? [pBoundary, pExtreme] : [pExtreme, pBoundary];
+  };
   scale.copy       = () => symlogTail(boundary, extreme, pBoundary, pExtreme, windowSlope);
   return scale;
 }
@@ -196,11 +207,23 @@ export function scaleAdaptive() {
     midScale   = scaleLinear().domain([currentXLo, currentXHi]).range([p1, p2]);
     rightScale = symlogTail(currentXHi, xMax, p2, rMax, windowSlope);
 
-    // Rebuild candidate pool for stable ticks
+    // Rebuild candidate pool for stable ticks. Built in MAGNITUDE space (|v|) and mirrored to
+    // both signs so negative and zero-crossing domains get the same log-spaced "nice" candidates
+    // a positive-only domain gets — the log tail scale (symlogTail) is itself sign-symmetric
+    // (distance from the boundary), so its tick pool should be too. Candidates outside the actual
+    // domain are dropped by the range check below.
     const set = new Set();
-    const lop = xMin > 0 ? xMin : Math.max(1e-9, xMax * 1e-7);
-    scaleLog().domain([lop, xMax]).ticks(100).forEach(v => set.add(v));
-    scaleLinear().domain([0, xMax]).ticks(100).forEach(v => { if (v > 0) set.add(v); });
+    const magMax = Math.max(Math.abs(xMin), Math.abs(xMax));
+    if (magMax > 0) {
+      const magMin = xMin > 0 || xMax < 0
+        ? Math.min(Math.abs(xMin), Math.abs(xMax))  // one-sided domain: real inner bound
+        : Math.max(1e-9, magMax * 1e-7);            // zero-crossing: no natural inner bound
+      scaleLog().domain([Math.max(magMin, 1e-9), magMax]).ticks(100).forEach(v => {
+        if (v >= xMin && v <= xMax) set.add(v);
+        if (-v >= xMin && -v <= xMax) set.add(-v);
+      });
+    }
+    scaleLinear().domain([xMin, xMax]).ticks(100).forEach(v => { if (v !== 0) set.add(v); });
     tickPool = [...set];
   }
 
@@ -311,21 +334,25 @@ export function scaleAdaptive() {
     return scale;
   };
 
+  // Magnitude-based so a "nice" negative candidate (-10, -50, -200) ranks the same as its
+  // positive mirror — matches the sign-symmetric tick pool built in rebuild().
   const tickPriority = v => {
-    if (!(v > 0)) return 0;
-    const e = Math.floor(Math.log10(v) + 1e-9);
-    const m = v / 10 ** e;
+    if (v === 0) return 0;
+    const av = Math.abs(v);
+    const e = Math.floor(Math.log10(av) + 1e-9);
+    const m = av / 10 ** e;
     const r = Math.abs(m - 1) < 1e-6 ? 4 : Math.abs(m - 5) < 1e-6 ? 3
             : Math.abs(m - 2) < 1e-6 ? 2 : Math.abs(m - Math.round(m)) < 1e-6 ? 1 : 0;
     return r * 1000 + e;
   };
 
   scale.ticks = function (count = 6) {
-    const MIN_TICK_PX = 42;
     const [rMin, rMax] = _range;
+    const MIN_TICK_PX = (rMax - rMin) / count;
     const [xMin, xMax] = _domain;
     const cands = new Set(tickPool);
     midScale.ticks(10).forEach(v => cands.add(v));
+    cands.add(xMin);
     cands.add(xMax);
     const placed = [...cands]
       .map(v => ({ v, px: scale(v), pr: tickPriority(v) }))
@@ -341,13 +368,15 @@ export function scaleAdaptive() {
   };
 
   scale.copy = function () {
+    // data() first — it derives _domain from the data's own extent. domain() then re-applies
+    // afterward so an explicit custom domain (set after data on the original) survives the copy.
     const clone = scaleAdaptive()
+      .data(_data.slice())
       .domain(_domain.slice())
       .range(_range.slice())
       .clamp(_clamp)
       .window(_window)
-      .breakpointMethod(_method)
-      .data(_data.slice());
+      .breakpointMethod(_method);
     if (_xLoOverride != null) {
       if (_focusUncapped) clone.focusDomain([_xLoOverride, _xHiOverride]);
       else clone.linearDomain([_xLoOverride, _xHiOverride]);

@@ -56,7 +56,7 @@ function render() {
     width: container.clientWidth,
     height: container.clientHeight,
     mode: 'piecewise',
-    window: 0.5,
+    windowFraction: 0.5,
     xLo: manualXLo ?? undefined,
     xHi: manualXHi ?? undefined,
     qLo: manualQLo ?? undefined,

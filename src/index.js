@@ -74,7 +74,7 @@ function renderExperimental(entranceAnimation = false, animateSpread = false) {
   const container = document.getElementById('chart-adaptive');
   const el = createAdaptiveChart(points, {
     width: container.clientWidth, height: container.clientHeight,
-    mode: 'piecewise', window: slider,
+    mode: 'piecewise', windowFraction: slider,
     xLo: manualXLo ?? undefined,
     xHi: manualXHi ?? undefined,
     qLo: manualQLo ?? undefined,

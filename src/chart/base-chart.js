@@ -5,7 +5,7 @@ import { scaleLinear } from 'd3-scale';
 import { axisBottom, axisLeft } from 'd3-axis';
 import { extent, bisectLeft } from 'd3-array';
 import { forceSimulation, forceCollide, forceY } from 'd3-force';
-import { makeFmt } from '../utils/format.js';
+import { makeFmt, tickCountForWidth } from '../utils/format.js';
 
 export const MARGIN = { top: 32, right: 24, bottom: 48, left: 56 };
 
@@ -115,7 +115,7 @@ export function createChart(points, xScale, {
   g.append('g')
     .attr('class', 'x-axis')
     .attr('transform', `translate(0,${innerH})`)
-    .call(axisBottom(xScale).ticks(6).tickFormat(xFmt));
+    .call(axisBottom(xScale).ticks(tickCountForWidth(innerW)).tickFormat(xFmt));
 
   // ── y-axis ───────────────────────────────────────────────────────────────
   g.append('g')

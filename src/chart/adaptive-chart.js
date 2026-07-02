@@ -6,13 +6,13 @@ import { axisBottom } from 'd3-axis';
 import { timer } from 'd3-timer';
 import { easeCubicInOut } from 'd3-ease';
 import { createChart, MARGIN } from './base-chart.js';
-import { makeFmt, fmtMult } from '../utils/format.js';
+import { makeFmt, fmtMult, tickCountForWidth } from '../utils/format.js';
 import { detectScaleType } from '../scale/detect.js';
 import { scaleAdaptive } from '../scale/adaptive-scale.js';
 
 export function createAdaptiveChart(points, {
   width = 900, height = 260,
-  window = 0.5,
+  windowFraction = 0.5, // slider tightness [0,1]; named to avoid shadowing globalThis.window
   xFormat = '~s',
   mode,
   xLo: xLoOverride,    // explicit boundary from drag handles; undefined = use windowQuantile
@@ -33,7 +33,7 @@ export function createAdaptiveChart(points, {
   return resolvedMode === 'log'
     ? renderLog(points, { width, height, xFormat, ...options })
     : renderPiecewise(points, {
-        width, height, window, xFormat,
+        width, height, windowFraction, xFormat,
         xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
         onWindowDrag, onWindowChange, onTravel,
         ...options,
@@ -54,7 +54,7 @@ function renderLog(points, { width, height, xFormat, ...options }) {
 const MIN_WINDOW_PX = 20; // minimum pixel width of the linear region
 
 function renderPiecewise(points, {
-  width, height, window, xFormat,
+  width, height, windowFraction, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
   onWindowDrag, onWindowChange, onTravel,
   ...options
@@ -69,7 +69,7 @@ function renderPiecewise(points, {
     .domain([xMin, xMax])
     .range([0, innerW])
     .data(xValues)
-    .window(window)
+    .window(windowFraction)
     .breakpointMethod('quantile'); // Use quantile matching chart slider
 
   if (xLoOverride != null && xHiOverride != null) {
@@ -391,7 +391,7 @@ function renderPiecewise(points, {
       rightHandle?.attr('transform', `translate(${currentR2},0)`);
       positionPanHint();  // the hint badge rides along, centred in the window
       // Live x-axis redraw — colour is inherited from CHART_CSS, so just rebind the axis.
-      g.select('.x-axis').call(axisBottom(xScale).ticks(6).tickFormat(xFmt));
+      g.select('.x-axis').call(axisBottom(xScale).ticks(tickCountForWidth(innerW)).tickFormat(xFmt));
       updateLinearAnnot(currentR1, currentR2, currentXLo, currentXHi);
       drawTailRuler(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
       drawTailRuler(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
@@ -510,7 +510,7 @@ function renderPiecewise(points, {
       overlay.node()?.focus({ preventScroll: true });
       // Destination geometry from a fresh focus scale — it picks the tail/focus pixel split.
       const aim = scaleAdaptive().domain([xMin, xMax]).range([0, innerW])
-        .data(xValues).window(window).breakpointMethod('quantile')
+        .data(xValues).window(windowFraction).breakpointMethod('quantile')
         .focusDomain([loBound, hiBound]);
       const [aimXLo, aimXHi] = aim.linearDomain();
       const [aimR1,  aimR2 ] = aim.linearRange();

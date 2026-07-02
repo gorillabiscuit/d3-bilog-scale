@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { scaleAdaptive } from '../src/scale/adaptive-scale.js';
+import { scaleAdaptive, symlogTail } from '../src/scale/adaptive-scale.js';
 
 // Canonical both-tails dataset
 const cluster = Array.from({ length: 160 }, (_, i) => 40 + (i / 159) * 40);
@@ -280,10 +280,67 @@ describe('d3 compatibility', () => {
     expect(s.range()).toEqual([0, 800]);
   });
 
+  test('copy() preserves a custom domain set after data()', () => {
+    // data() derives _domain from the data's extent; a domain() call afterward overrides it.
+    // copy() must replay data() before domain() internally or the override is lost on the clone.
+    const s = scaleAdaptive()
+      .data([1, 2, 3, 4, 5, 100])
+      .domain([0, 200])
+      .range([0, 800]);
+    const c = s.copy();
+    expect(c.domain()).toEqual([0, 200]);
+    expect(c(150)).toBeCloseTo(s(150), 6);
+  });
+
   test('clamp(true) prevents extrapolation', () => {
     const s = makeScale().clamp(true);
     const [dMin, dMax] = s.domain();
     expect(s(dMin - 100)).toBeCloseTo(s(dMin), 1);
     expect(s(dMax + 1000)).toBeCloseTo(s(dMax), 1);
+  });
+});
+
+describe('ticks()', () => {
+  test('honours the requested count instead of a fixed pixel gate', () => {
+    const s = makeScale();
+    // A wider range at the same count should not silently produce more ticks — the caller's
+    // count is what governs density now, not a hardcoded pixel threshold.
+    const narrow = scaleAdaptive().data(bothTails).range([0, 400]).ticks(6);
+    const wide = scaleAdaptive().data(bothTails).range([0, 4000]).ticks(6);
+    expect(wide.length).toBeCloseTo(narrow.length, 0);
+  });
+
+  test('produces tick candidates in the negative tail on zero-crossing data', () => {
+    const s = scaleAdaptive().data([-500, -100, -10, -1, 1, 10, 100, 500]).range([0, 800]);
+    const ticks = s.ticks(8);
+    expect(ticks.some((v) => v < 0)).toBe(true);
+    expect(ticks.some((v) => v > 0)).toBe(true);
+  });
+
+  test('produces ticks across an all-negative domain', () => {
+    const s = scaleAdaptive().data([-1000, -500, -100, -50, -10, -5, -1]).range([0, 800]);
+    const ticks = s.ticks(6);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((v) => v <= 0)).toBe(true);
+  });
+
+  test('domain minimum is offered as a tick candidate', () => {
+    const s = scaleAdaptive().data([1, 5, 10, 50, 100, 5000]).range([0, 800]);
+    const [xMin] = s.domain();
+    // Not guaranteed to survive MIN_TICK_PX spacing, but it must be in the candidate pool —
+    // spread the range wide enough that it isn't crowded out.
+    const wide = scaleAdaptive().data([1, 5, 10, 50, 100, 5000]).range([0, 3000]);
+    expect(wide.ticks(20)).toContain(xMin);
+  });
+});
+
+describe('symlogTail()', () => {
+  test('domain()/range() setter forms throw instead of silently no-op-ing', () => {
+    const tail = symlogTail(100, 1000, 0, 200, 1);
+    expect(() => tail.domain([0, 1])).toThrow();
+    expect(() => tail.range([0, 1])).toThrow();
+    // Getter form still works
+    expect(tail.domain()).toEqual([100, 1000]);
+    expect(tail.range()).toEqual([0, 200]);
   });
 });
