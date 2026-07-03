@@ -458,7 +458,18 @@ function renderPiecewise(points, {
       .append('rect').attr('x', tA).attr('width', Math.max(0, tB - tA)).attr('y', 0).attr('height', innerH);
     const linesG = grp.append('g').attr('clip-path', `url(#${clipId})`);
 
-    const spacing = Math.max(1, hatchSpacing);
+    // Spacing is uniform WITHIN a tail, but each tail's spacing reflects its overall
+    // compression: dollars-per-pixel in the tail vs in the linear window, log-mapped
+    // (compression spans orders of magnitude — the right tail can hold 50× the window's
+    // dollar range; linear mapping would go sub-pixel). An uncompressed tail hatches at
+    // hatchSpacing; each 10× of average compression adds one unit of density. This keeps
+    // the two tails visually distinct without the within-tail gradient that read as an
+    // artifact.
+    const windowRate = (currentR2 - currentR1) / W;            // px per dollar, linear window
+    const tailRate   = (tB - tA) / Math.abs(extreme - boundary); // px per dollar, tail average
+    const compression = Math.max(1, windowRate / tailRate);
+    const spacing = Math.max(1.5, hatchSpacing / (1 + Math.log10(compression)));
+
     for (let c = tA - innerH / 2; c <= tB + innerH / 2; c += spacing) {
       linesG.append('line').attr('class', 'hatch-line')
         .attr('x1', c - hatchAngle * innerH / 2).attr('y1', 0)
