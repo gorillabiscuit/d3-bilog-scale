@@ -87,10 +87,8 @@ function renderPiecewise(points, {
   tailTintStep = 0.012, // opacity added per chunk outward
   tailTintMax = 0.10,   // tint ceiling
   rulerMinPx = 2,       // tail chunk narrower than this stops the ruler (density cap)
-  hatchSpacing = 8,     // hatch mode: px between lines in the widest (boundary-nearest) band
-  hatchMinPx = 2,       // hatch mode: spacing below this → solid fill to the extreme
+  hatchSpacing = 8,     // hatch mode: px between the uniformly spaced diagonal lines
   hatchOpacity = 0.45,  // hatch mode: stroke opacity of the diagonal lines
-  hatchFillOpacity = 0.5, // hatch mode: opacity of the solid fill past max compression
   hatchAngle = 1,       // hatch mode: 1 = "\" diagonals, -1 = "/" diagonals
   ...options
 }) {
@@ -408,15 +406,12 @@ function renderPiecewise(points, {
         .text(d => d.text);
   }
 
-  // ── Hatch texture (the development-process encoding, kept as an option) ─────
-  // Each tail is tiled into the same window-width chunks the ruler uses, but rendered as
-  // 45° diagonal <line> elements whose spacing encodes compression: the boundary-nearest
-  // (widest) band gets hatchSpacing px between lines, narrower bands get proportionally
-  // denser lines, and once spacing falls below hatchMinPx the rest of the tail is a solid
-  // fill. Lines are explicit primitives inside a per-band clipPath — never SVG <pattern>,
-  // which Chrome clips at tile boundaries even with overflow:visible, leaving anti-aliased
-  // dots at every seam. One dimension annotation spans the whole tail (the historical look),
-  // instead of the ruler's per-chunk arrows.
+  // ── Hatch texture (the development-process visual, kept as an option) ─────
+  // Uniformly spaced 45° diagonal <line> elements across each log tail — a flat section
+  // hatch marking the compressed regions, with one dimension annotation spanning the whole
+  // tail instead of the ruler's per-chunk arrows. Lines are explicit primitives inside a
+  // whole-tail clipPath — never SVG <pattern>, which Chrome clips at tile boundaries even
+  // with overflow:visible, leaving anti-aliased dots at every seam.
   const hatchInstId = `hatch-${++_hatchInstId}`;
   const svgDefs = select(node).select('defs');
 
@@ -425,7 +420,6 @@ function renderPiecewise(points, {
     const side = extreme < boundary ? 'l' : 'r';
     svgDefs.selectAll(`[id^="${hatchInstId}-${side}"]`).remove();
     if (!(W > 0) || boundary === extreme) return;
-    const outward = Math.sign(extreme - boundary) || 1;
 
     // Whole-tail dimension annotation: log + dollar span, same classes as the ruler labels.
     const tA = Math.min(sub(boundary), sub(extreme)), tB = Math.max(sub(boundary), sub(extreme));
@@ -449,76 +443,27 @@ function renderPiecewise(points, {
         .attr('points', `${tB},${ANNOT_Y} ${tB - ANNOT_ARR},${ANNOT_Y - 3} ${tB - ANNOT_ARR},${ANNOT_Y + 3}`);
     }
 
-    // Continuous marching lines — NOT per-band lattices. Discrete bands each carried their
-    // own line phase, so diagonals got cut at every band seam and the next band's lines
-    // didn't continue them (visible stagger, worst where bands were near-equal width).
-    // Instead, spacing follows the scale's LOCAL compression rate at each anchor: density
-    // varies smoothly, every line runs full height unbroken, and there are no seams at all.
-    const boundaryPx = sub(boundary);
-    const extremePx  = sub(extreme);
-    const dir = Math.sign(extremePx - boundaryPx) || 1; // pixel direction outward
-
-    // Local pixels-per-dollar at value v (numeric derivative, evaluated outward).
-    const dv = Math.abs(extreme - boundary) * 1e-6;
-    const rateAt = v => Math.abs(sub(v + outward * dv) - sub(v)) / dv;
-    const r0 = rateAt(boundary) || 1; // ≈ windowSlope by construction (C¹ joint)
-
-    // Whole-tail clip so lines entering from outside the tail still cover its corners.
-    // (Shrunk later if a solid-fill region is drawn, so no line slants into the fill —
-    // the hatch→solid transition stays a clean vertical edge.)
+    // UNIFORM hatch — a flat texture marking "this region is log-compressed", like an
+    // engineering-drawing section hatch. Spacing is constant (hatchSpacing) across the whole
+    // tail: earlier versions varied density with the local compression rate, but graded
+    // spacing reads as an artifact rather than an encoding at this scale, and the region
+    // annotations already carry the compression numbers.
+    //
+    // Anchors are the line's x at MID-HEIGHT (y = innerH/2): a point (x, y) is only crossed
+    // by lines whose mid-height x lies within innerH/2 of it, and the march overshoots each
+    // tail edge by exactly innerH/2 — complete coverage for either hatchAngle, no wedges.
+    // A whole-tail clipPath trims the overshoot.
     const clipId = `${hatchInstId}-${side}`;
-    const clipRect = svgDefs.append('clipPath').attr('id', clipId)
+    svgDefs.append('clipPath').attr('id', clipId)
       .append('rect').attr('x', tA).attr('width', Math.max(0, tB - tA)).attr('y', 0).attr('height', innerH);
     const linesG = grp.append('g').attr('clip-path', `url(#${clipId})`);
 
-    // March anchors, where an anchor c is the line's x at MID-HEIGHT (y = innerH/2), not the
-    // top edge. Two reasons:
-    //  - Coverage is provably complete for either hatchAngle: a point (x, y) is only crossed
-    //    by lines whose mid-height x lies within innerH/2 of x, and the march overshoots each
-    //    tail edge by exactly innerH/2 — so no wedge of missing texture can appear (the "/"
-    //    direction previously lost a diagonal wedge near the solid fill).
-    //  - The density gradient reads at chart centre instead of sheared by a full chart height
-    //    (top-edge anchors made spacing at eye level reflect the compression rate innerH away).
-    const clampPx = px => Math.max(Math.min(boundaryPx, extremePx), Math.min(Math.max(boundaryPx, extremePx), px));
-    const spacingAt = c => Math.max(0.5, hatchSpacing * (rateAt(sub.invert(clampPx(c))) / r0));
-
-    let c = (dir > 0 ? tA : tB) - dir * innerH / 2;
-    const endC = (dir > 0 ? tB : tA) + dir * innerH / 2;
-    const maxLines = Math.ceil(Math.abs(endC - c) / 0.5) + 4;
-    let fillEdge = null;
-    for (let i = 0; i < maxLines; i++) {
-      if (dir > 0 ? c > endC : c < endC) break;
-      let spacing = spacingAt(c);
-
-      // Density has hit the floor inside the tail — solid fill from here to the extreme and
-      // trim the line clip so the hatch→solid transition is a clean vertical edge.
-      const inTail = dir > 0 ? c >= tA : c <= tB;
-      if (fillEdge === null && spacing < hatchMinPx && inTail) {
-        fillEdge = c;
-        const fillA = dir > 0 ? Math.max(tA, c) : tA;
-        const fillB = dir > 0 ? tB : Math.min(tB, c);
-        if (fillB - fillA > 0.5) {
-          grp.append('rect').attr('class', 'hatch-fill')
-            .attr('x', fillA).attr('width', fillB - fillA)
-            .attr('y', 0).attr('height', innerH)
-            .attr('fill-opacity', hatchFillOpacity);
-          if (dir > 0) clipRect.attr('width', Math.max(0, fillA - tA));
-          else clipRect.attr('x', fillB).attr('width', Math.max(0, tB - fillB));
-        }
-      }
-      if (fillEdge !== null) {
-        // Keep marching half a height past the fill edge (at the floor spacing) so slanted
-        // lines anchored beyond it still cover the hatch strip's corners next to the fill —
-        // stopping dead at the edge is what cut the "/" texture along a diagonal.
-        spacing = Math.max(spacing, hatchMinPx);
-        if (dir > 0 ? c > fillEdge + innerH / 2 : c < fillEdge - innerH / 2) break;
-      }
-
+    const spacing = Math.max(1, hatchSpacing);
+    for (let c = tA - innerH / 2; c <= tB + innerH / 2; c += spacing) {
       linesG.append('line').attr('class', 'hatch-line')
         .attr('x1', c - hatchAngle * innerH / 2).attr('y1', 0)
         .attr('x2', c + hatchAngle * innerH / 2).attr('y2', innerH)
         .attr('stroke-opacity', hatchOpacity).attr('stroke-width', 1);
-      c += dir * spacing;
     }
   }
 

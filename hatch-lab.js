@@ -6,22 +6,21 @@ import { createAdaptiveChart } from './src/chart/adaptive-chart.js';
 const urlTheme = new URLSearchParams(window.location.search).get('theme');
 document.documentElement.setAttribute('data-theme', urlTheme === 'dark' ? 'dark' : 'light');
 
-// The candidates. "current" is what's deployed right now; the rest bracket it in
-// spacing (band contrast), line opacity (texture weight), fill opacity (how hard the
-// solid "maximally compressed" block reads), and direction.
+// The candidates — uniform hatch, varied in spacing (texture scale), opacity (weight),
+// and direction. "current" is the default the embed ships with.
 const VARIANTS = [
-  { title: 'A — current (deployed)', opts: {} },
-  { title: 'B — sparser, lighter', opts: { hatchSpacing: 12, hatchOpacity: 0.3 } },
-  { title: 'C — denser, lighter', opts: { hatchSpacing: 6, hatchOpacity: 0.3 } },
-  { title: 'D — sparser, softer fill', opts: { hatchSpacing: 12, hatchOpacity: 0.45, hatchFillOpacity: 0.3 } },
-  { title: 'E — heavy texture', opts: { hatchSpacing: 6, hatchOpacity: 0.6, hatchFillOpacity: 0.65 } },
+  { title: 'A — current (default)', opts: {} },
+  { title: 'B — sparse, light', opts: { hatchSpacing: 12, hatchOpacity: 0.3 } },
+  { title: 'C — dense, light', opts: { hatchSpacing: 6, hatchOpacity: 0.3 } },
+  { title: 'D — sparse, standard weight', opts: { hatchSpacing: 12 } },
+  { title: 'E — dense, heavy', opts: { hatchSpacing: 6, hatchOpacity: 0.6 } },
   { title: 'F — "/" direction', opts: { hatchAngle: -1 } },
-  { title: 'G — fine grain, low weight', opts: { hatchSpacing: 5, hatchMinPx: 1.5, hatchOpacity: 0.25, hatchFillOpacity: 0.35 } },
-  { title: 'H — coarse, soft everything', opts: { hatchSpacing: 16, hatchMinPx: 3, hatchOpacity: 0.35, hatchFillOpacity: 0.25 } },
+  { title: 'G — fine grain, whisper', opts: { hatchSpacing: 5, hatchOpacity: 0.25 } },
+  { title: 'H — coarse, soft', opts: { hatchSpacing: 16, hatchOpacity: 0.35 } },
 ];
 
 const fmtOpts = (o) =>
-  Object.entries({ hatchSpacing: 8, hatchMinPx: 2, hatchOpacity: 0.45, hatchFillOpacity: 0.5, hatchAngle: 1, ...o })
+  Object.entries({ hatchSpacing: 8, hatchOpacity: 0.45, hatchAngle: 1, ...o })
     .map(([k, v]) => `${k.replace('hatch', '').toLowerCase()}=${v}`)
     .join(' · ');
 
