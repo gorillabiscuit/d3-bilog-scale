@@ -43,6 +43,8 @@ export const CHART_CSS = `
 .chart .pan-hint-bg,
 .chart .ruler-arrow line { stroke: var(--ruler-tint, #fff); }
 .chart .ruler-arrow polygon { fill: var(--ruler-tint, #fff); }
+.chart .hatch-line { stroke: var(--ruler-tint, #fff); }
+.chart .hatch-fill { fill: var(--ruler-tint, #fff); }
 .chart .annot-value { paint-order: stroke fill; stroke: var(--chart-surface, #16213e); stroke-width: 3px; }
 `;
 

@@ -70,16 +70,25 @@ function renderLog(points, { x, width, height, xFormat, ...options }) {
 
 // ── Piecewise mode ────────────────────────────────────────────────────────────
 
+// Unique per-instance prefix for hatch clipPath ids — Observable renders many cells at
+// once; a shared id would silently clip the wrong chart.
+let _hatchInstId = 0;
+
 function renderPiecewise(points, {
   x, width, height, windowFraction, breakpointMethod, xFormat,
   xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
   onWindowDrag, onWindowChange, onTravel,
   minWindowPx = 20,     // minimum pixel width the linear region can be dragged down to
   showHint = true,      // the fading "click a section · ←/→ to travel" badge on first render
+  tailTexture = 'ruler', // 'ruler' (chunk posts + per-chunk arrows) | 'hatch' (the diagonal-hatch
+                         // density encoding from the development process — kept as an option so
+                         // the article can embed the historical experiment on the current engine)
   tailTintBase = 0.02,  // fill opacity of the first (innermost) tail chunk
   tailTintStep = 0.012, // opacity added per chunk outward
   tailTintMax = 0.10,   // tint ceiling
   rulerMinPx = 2,       // tail chunk narrower than this stops the ruler (density cap)
+  hatchSpacing = 8,     // hatch mode: px between lines in the widest (boundary-nearest) band
+  hatchMinPx = 2,       // hatch mode: spacing below this → solid fill to the extreme
   ...options
 }) {
   const marginLeft = options.marginLeft ?? MARGIN.left;
@@ -396,9 +405,96 @@ function renderPiecewise(points, {
         .text(d => d.text);
   }
 
+  // ── Hatch texture (the development-process encoding, kept as an option) ─────
+  // Each tail is tiled into the same window-width chunks the ruler uses, but rendered as
+  // 45° diagonal <line> elements whose spacing encodes compression: the boundary-nearest
+  // (widest) band gets hatchSpacing px between lines, narrower bands get proportionally
+  // denser lines, and once spacing falls below hatchMinPx the rest of the tail is a solid
+  // fill. Lines are explicit primitives inside a per-band clipPath — never SVG <pattern>,
+  // which Chrome clips at tile boundaries even with overflow:visible, leaving anti-aliased
+  // dots at every seam. One dimension annotation spans the whole tail (the historical look),
+  // instead of the ruler's per-chunk arrows.
+  const hatchInstId = `hatch-${++_hatchInstId}`;
+  const svgDefs = select(node).select('defs');
+
+  function drawTailHatch(grp, sub, boundary, extreme, W) {
+    grp.selectAll('*').remove();
+    const side = extreme < boundary ? 'l' : 'r';
+    svgDefs.selectAll(`[id^="${hatchInstId}-${side}"]`).remove();
+    if (!(W > 0) || boundary === extreme) return;
+    const outward = Math.sign(extreme - boundary) || 1;
+
+    // Whole-tail dimension annotation: log + dollar span, same classes as the ruler labels.
+    const tA = Math.min(sub(boundary), sub(extreme)), tB = Math.max(sub(boundary), sub(extreme));
+    if (tB - tA >= 2 * ANNOT_ARR + 28) {
+      const cx = (tA + tB) / 2;
+      grp.append('text').attr('class', 'ruler-lbl')
+        .attr('x', cx).attr('y', 8).attr('text-anchor', 'middle')
+        .attr('fill-opacity', 0.3).attr('font-size', '9px').attr('font-style', 'italic')
+        .text('log');
+      grp.append('text').attr('class', 'annot-value')
+        .attr('x', cx).attr('y', ANNOT_Y - 2).attr('text-anchor', 'middle')
+        .attr('fill-opacity', 0.65).attr('font-size', '10px').attr('font-weight', '500')
+        .text(xFmt(Math.abs(extreme - boundary)));
+      grp.append('line').attr('class', 'annot-line')
+        .attr('x1', tA + ANNOT_ARR).attr('x2', tB - ANNOT_ARR)
+        .attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
+        .attr('stroke-opacity', 0.45).attr('stroke-width', 1);
+      grp.append('polygon').attr('class', 'annot-arrow').attr('fill-opacity', 0.45)
+        .attr('points', `${tA},${ANNOT_Y} ${tA + ANNOT_ARR},${ANNOT_Y - 3} ${tA + ANNOT_ARR},${ANNOT_Y + 3}`);
+      grp.append('polygon').attr('class', 'annot-arrow').attr('fill-opacity', 0.45)
+        .attr('points', `${tB},${ANNOT_Y} ${tB - ANNOT_ARR},${ANNOT_Y - 3} ${tB - ANNOT_ARR},${ANNOT_Y + 3}`);
+    }
+
+    // A tail narrower than one window-width would be a single uniform band — subdivide it
+    // into ~6 slices instead so the density gradient still reads (the historical behaviour).
+    const span = Math.abs(extreme - boundary);
+    const step = span > W ? W : span / 6;
+
+    let maxBandW = null;
+    for (let k = 0; k < 4000; k++) {
+      const d0 = boundary + outward * k * step;
+      let d1 = boundary + outward * (k + 1) * step;
+      const beyond = outward > 0 ? d1 >= extreme : d1 <= extreme;
+      if (beyond) d1 = extreme;
+      const a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
+      const bandW = b - a;
+      if (maxBandW === null) maxBandW = bandW || 1;
+      const spacing = hatchSpacing * (bandW / maxBandW);
+
+      if (spacing < hatchMinPx) {
+        // This band and everything beyond is maximally compressed — solid fill to the extreme.
+        const fillA = Math.min(a, sub(extreme)), fillB = Math.max(b, sub(extreme));
+        if (fillB - fillA > 0.5) {
+          grp.append('rect').attr('class', 'hatch-fill')
+            .attr('x', fillA).attr('width', fillB - fillA)
+            .attr('y', 0).attr('height', innerH)
+            .attr('fill-opacity', 0.5);
+        }
+        return;
+      }
+
+      const clipId = `${hatchInstId}-${side}${k}`;
+      svgDefs.append('clipPath').attr('id', clipId)
+        .append('rect').attr('x', a).attr('width', bandW).attr('y', 0).attr('height', innerH);
+      const bandG = grp.append('g').attr('clip-path', `url(#${clipId})`);
+      // Full-height \ diagonals; start innerH left of the band so lines entering from the
+      // top-left still cover its bottom-left corner.
+      for (let px = a - innerH; px <= b; px += spacing) {
+        bandG.append('line').attr('class', 'hatch-line')
+          .attr('x1', px).attr('y1', 0)
+          .attr('x2', px + innerH).attr('y2', innerH)
+          .attr('stroke-opacity', 0.45).attr('stroke-width', 1);
+      }
+      if (beyond) return;
+    }
+  }
+
+  const drawTail = tailTexture === 'hatch' ? drawTailHatch : drawTailRuler;
+
   updateLinearAnnot(r1, r2, xLo, xHi);
-  drawTailRuler(leftRulerG,  leftScale,  xLo, xMin, xHi - xLo);
-  drawTailRuler(rightRulerG, rightScale, xHi, xMax, xHi - xLo);
+  drawTail(leftRulerG,  leftScale,  xLo, xMin, xHi - xLo);
+  drawTail(rightRulerG, rightScale, xHi, xMax, xHi - xLo);
 
   // Report the window the scale actually settled on (after capping) so the page readout
   // reflects what's rendered, not the raw slider quantiles.
@@ -428,8 +524,8 @@ function renderPiecewise(points, {
       // Live x-axis redraw — colour is inherited from CHART_CSS, so just rebind the axis.
       g.select('.x-axis').call(axisBottom(xScale).ticks(tickCountForWidth(innerW)).tickFormat(xFmt));
       updateLinearAnnot(currentR1, currentR2, currentXLo, currentXHi);
-      drawTailRuler(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
-      drawTailRuler(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
+      drawTail(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
+      drawTail(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
       rebuildTailOverlays();
       onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi });
     }

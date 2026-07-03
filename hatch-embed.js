@@ -73,6 +73,7 @@ function render() {
     xFormat: 'currency',
     yFormat: 'currency',
     spread: null, // dots at true positions — the embed has no spread toggle
+    tailTexture: 'hatch', // the historical diagonal-hatch encoding — this embed IS the experiment
     // Chart colours come from the CSS custom properties in CHART_CSS (dark fallbacks built in);
     // THEMES below only feeds the press-S SVG export background.
   });
