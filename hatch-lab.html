@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hatch lab — variant comparison</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      background: var(--embed-bg, #ffffff);
+      color: var(--embed-text, #1a1a2e);
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+
+    [data-theme="dark"] {
+      --embed-bg: #16213e;
+      --embed-text: #e0e0f0;
+      --card-border: #2a2a5a;
+      --dot-fill:          #7070ff;
+      --axis-color:        #3a3a6a;
+      --axis-text:         #a0a0c0;
+      --label-color:       #6060a0;
+      --tooltip-bg:        #0d1a33;
+      --tooltip-border:    #3a3a6a;
+      --tooltip-text:      #e0e0f0;
+      --tooltip-text-muted:#a0a0c0;
+      --ruler-tint:        #ffffff;
+      --chart-surface:     #16213e;
+    }
+
+    [data-theme="light"] {
+      --embed-bg: #ffffff;
+      --embed-text: #1a1a2e;
+      --card-border: #d8d8ea;
+      --dot-fill:          #4040cc;
+      --axis-color:        #c0c0d8;
+      --axis-text:         #5050a0;
+      --label-color:       #8080b0;
+      --tooltip-bg:        #f0f0ff;
+      --tooltip-border:    #c0c0d8;
+      --tooltip-text:      #1a1a2e;
+      --tooltip-text-muted:#5050a0;
+      --ruler-tint:        #4040cc;
+      --chart-surface:     #ffffff;
+    }
+
+    header {
+      display: flex; align-items: baseline; gap: 16px;
+      padding: 14px 20px 6px;
+    }
+    header h1 { font-size: 15px; font-weight: 600; }
+    header p  { font-size: 12px; opacity: 0.6; }
+    header a  { color: inherit; }
+
+    #grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      padding: 14px 20px 40px;
+    }
+
+    .variant {
+      border: 1px solid var(--card-border, #d8d8ea);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .variant h2 {
+      font-size: 11.5px; font-weight: 600;
+      padding: 8px 12px 2px;
+    }
+    .variant p {
+      font-size: 10.5px; opacity: 0.55;
+      padding: 0 12px 6px;
+      font-family: ui-monospace, monospace;
+    }
+    .variant .chart-container { width: 100%; height: 300px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Hatch lab</h1>
+    <p>NYC property sales · toggle theme with <a href="?theme=dark">?theme=dark</a> / <a href="?theme=light">?theme=light</a> · each panel is fully interactive</p>
+  </header>
+  <div id="grid"></div>
+  <script type="module" src="/hatch-lab.js"></script>
+</body>
+</html>

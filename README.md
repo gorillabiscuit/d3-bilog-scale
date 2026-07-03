@@ -135,8 +135,11 @@ Returns a detached `<svg>` node (the Observable cell pattern). All options are o
 | `tailTintBase` / `tailTintStep` / `tailTintMax` | `0.02 / 0.012 / 0.10` | tint ramp of the tail-ruler chunks |
 | `rulerMinPx` | `2` | chunk narrower than this stops the ruler (density cap) |
 | `tailTexture` | `'ruler'` | `'ruler'` or `'hatch'` — the diagonal-hatch density encoding from the development process, kept as an option |
-| `hatchSpacing` | `8` | hatch mode: px between lines in the widest (boundary-nearest) band |
+| `hatchSpacing` | `8` | hatch mode: px between lines at the tail boundary (least compressed point) |
 | `hatchMinPx` | `2` | hatch mode: spacing below this solid-fills the rest of the tail |
+| `hatchOpacity` | `0.45` | hatch mode: stroke opacity of the diagonal lines |
+| `hatchFillOpacity` | `0.5` | hatch mode: opacity of the solid max-compression fill |
+| `hatchAngle` | `1` | hatch mode: `1` = `\` diagonals, `-1` = `/` |
 
 ### Node methods
 

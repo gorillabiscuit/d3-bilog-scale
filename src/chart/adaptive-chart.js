@@ -89,6 +89,9 @@ function renderPiecewise(points, {
   rulerMinPx = 2,       // tail chunk narrower than this stops the ruler (density cap)
   hatchSpacing = 8,     // hatch mode: px between lines in the widest (boundary-nearest) band
   hatchMinPx = 2,       // hatch mode: spacing below this → solid fill to the extreme
+  hatchOpacity = 0.45,  // hatch mode: stroke opacity of the diagonal lines
+  hatchFillOpacity = 0.5, // hatch mode: opacity of the solid fill past max compression
+  hatchAngle = 1,       // hatch mode: 1 = "\" diagonals, -1 = "/" diagonals
   ...options
 }) {
   const marginLeft = options.marginLeft ?? MARGIN.left;
@@ -446,47 +449,62 @@ function renderPiecewise(points, {
         .attr('points', `${tB},${ANNOT_Y} ${tB - ANNOT_ARR},${ANNOT_Y - 3} ${tB - ANNOT_ARR},${ANNOT_Y + 3}`);
     }
 
-    // A tail narrower than one window-width would be a single uniform band — subdivide it
-    // into ~6 slices instead so the density gradient still reads (the historical behaviour).
-    const span = Math.abs(extreme - boundary);
-    const step = span > W ? W : span / 6;
+    // Continuous marching lines — NOT per-band lattices. Discrete bands each carried their
+    // own line phase, so diagonals got cut at every band seam and the next band's lines
+    // didn't continue them (visible stagger, worst where bands were near-equal width).
+    // Instead, spacing follows the scale's LOCAL compression rate at each anchor: density
+    // varies smoothly, every line runs full height unbroken, and there are no seams at all.
+    const boundaryPx = sub(boundary);
+    const extremePx  = sub(extreme);
+    const dir = Math.sign(extremePx - boundaryPx) || 1; // pixel direction outward
 
-    let maxBandW = null;
-    for (let k = 0; k < 4000; k++) {
-      const d0 = boundary + outward * k * step;
-      let d1 = boundary + outward * (k + 1) * step;
-      const beyond = outward > 0 ? d1 >= extreme : d1 <= extreme;
-      if (beyond) d1 = extreme;
-      const a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
-      const bandW = b - a;
-      if (maxBandW === null) maxBandW = bandW || 1;
-      const spacing = hatchSpacing * (bandW / maxBandW);
+    // Local pixels-per-dollar at value v (numeric derivative, evaluated outward).
+    const dv = Math.abs(extreme - boundary) * 1e-6;
+    const rateAt = v => Math.abs(sub(v + outward * dv) - sub(v)) / dv;
+    const r0 = rateAt(boundary) || 1; // ≈ windowSlope by construction (C¹ joint)
 
-      if (spacing < hatchMinPx) {
-        // This band and everything beyond is maximally compressed — solid fill to the extreme.
-        const fillA = Math.min(a, sub(extreme)), fillB = Math.max(b, sub(extreme));
+    // Whole-tail clip so lines entering from outside the tail still cover its corners.
+    // (Shrunk later if a solid-fill region is drawn, so no line slants into the fill —
+    // the hatch→solid transition stays a clean vertical edge.)
+    const clipId = `${hatchInstId}-${side}`;
+    const clipRect = svgDefs.append('clipPath').attr('id', clipId)
+      .append('rect').attr('x', tA).attr('width', Math.max(0, tB - tA)).attr('y', 0).attr('height', innerH);
+    const linesG = grp.append('g').attr('clip-path', `url(#${clipId})`);
+
+    // March anchors (top-edge x of each 45° line) from one overshoot edge to the other; the
+    // overshoot (innerH each side) lets slanted lines reach the tail's bottom corners. Outside
+    // the tail the local rate is clamped to the nearest in-tail value.
+    const clampV = px => sub.invert(Math.max(Math.min(boundaryPx, extremePx), Math.min(Math.max(boundaryPx, extremePx), px)));
+    let px = boundaryPx - dir * innerH;
+    const endPx = extremePx + dir * innerH;
+    const maxLines = Math.ceil((Math.abs(endPx - px)) / Math.max(0.5, hatchMinPx)) + 4;
+    for (let i = 0; i < maxLines; i++) {
+      if (dir > 0 ? px > endPx : px < endPx) break;
+      const spacing = Math.max(0.5, hatchSpacing * (rateAt(clampV(px)) / r0));
+
+      // Past this point the texture would be denser than hatchMinPx — solid fill the rest
+      // of the tail (only meaningful once we're inside it).
+      const inTail = dir > 0 ? px >= tA : px <= tB;
+      if (spacing < hatchMinPx && inTail) {
+        const fillA = dir > 0 ? Math.max(tA, px) : tA;
+        const fillB = dir > 0 ? tB : Math.min(tB, px);
         if (fillB - fillA > 0.5) {
           grp.append('rect').attr('class', 'hatch-fill')
             .attr('x', fillA).attr('width', fillB - fillA)
             .attr('y', 0).attr('height', innerH)
-            .attr('fill-opacity', 0.5);
+            .attr('fill-opacity', hatchFillOpacity);
+          // Trim the line clip at the fill edge so no diagonal slants into the solid block.
+          if (dir > 0) clipRect.attr('width', Math.max(0, fillA - tA));
+          else clipRect.attr('x', fillB).attr('width', Math.max(0, tB - fillB));
         }
-        return;
+        break;
       }
 
-      const clipId = `${hatchInstId}-${side}${k}`;
-      svgDefs.append('clipPath').attr('id', clipId)
-        .append('rect').attr('x', a).attr('width', bandW).attr('y', 0).attr('height', innerH);
-      const bandG = grp.append('g').attr('clip-path', `url(#${clipId})`);
-      // Full-height \ diagonals; start innerH left of the band so lines entering from the
-      // top-left still cover its bottom-left corner.
-      for (let px = a - innerH; px <= b; px += spacing) {
-        bandG.append('line').attr('class', 'hatch-line')
-          .attr('x1', px).attr('y1', 0)
-          .attr('x2', px + innerH).attr('y2', innerH)
-          .attr('stroke-opacity', 0.45).attr('stroke-width', 1);
-      }
-      if (beyond) return;
+      linesG.append('line').attr('class', 'hatch-line')
+        .attr('x1', px).attr('y1', 0)
+        .attr('x2', px + hatchAngle * innerH).attr('y2', innerH)
+        .attr('stroke-opacity', hatchOpacity).attr('stroke-width', 1);
+      px += dir * spacing;
     }
   }
 
