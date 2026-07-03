@@ -471,40 +471,54 @@ function renderPiecewise(points, {
       .append('rect').attr('x', tA).attr('width', Math.max(0, tB - tA)).attr('y', 0).attr('height', innerH);
     const linesG = grp.append('g').attr('clip-path', `url(#${clipId})`);
 
-    // March anchors (top-edge x of each 45° line) from one overshoot edge to the other; the
-    // overshoot (innerH each side) lets slanted lines reach the tail's bottom corners. Outside
-    // the tail the local rate is clamped to the nearest in-tail value.
-    const clampV = px => sub.invert(Math.max(Math.min(boundaryPx, extremePx), Math.min(Math.max(boundaryPx, extremePx), px)));
-    let px = boundaryPx - dir * innerH;
-    const endPx = extremePx + dir * innerH;
-    const maxLines = Math.ceil((Math.abs(endPx - px)) / Math.max(0.5, hatchMinPx)) + 4;
-    for (let i = 0; i < maxLines; i++) {
-      if (dir > 0 ? px > endPx : px < endPx) break;
-      const spacing = Math.max(0.5, hatchSpacing * (rateAt(clampV(px)) / r0));
+    // March anchors, where an anchor c is the line's x at MID-HEIGHT (y = innerH/2), not the
+    // top edge. Two reasons:
+    //  - Coverage is provably complete for either hatchAngle: a point (x, y) is only crossed
+    //    by lines whose mid-height x lies within innerH/2 of x, and the march overshoots each
+    //    tail edge by exactly innerH/2 — so no wedge of missing texture can appear (the "/"
+    //    direction previously lost a diagonal wedge near the solid fill).
+    //  - The density gradient reads at chart centre instead of sheared by a full chart height
+    //    (top-edge anchors made spacing at eye level reflect the compression rate innerH away).
+    const clampPx = px => Math.max(Math.min(boundaryPx, extremePx), Math.min(Math.max(boundaryPx, extremePx), px));
+    const spacingAt = c => Math.max(0.5, hatchSpacing * (rateAt(sub.invert(clampPx(c))) / r0));
 
-      // Past this point the texture would be denser than hatchMinPx — solid fill the rest
-      // of the tail (only meaningful once we're inside it).
-      const inTail = dir > 0 ? px >= tA : px <= tB;
-      if (spacing < hatchMinPx && inTail) {
-        const fillA = dir > 0 ? Math.max(tA, px) : tA;
-        const fillB = dir > 0 ? tB : Math.min(tB, px);
+    let c = (dir > 0 ? tA : tB) - dir * innerH / 2;
+    const endC = (dir > 0 ? tB : tA) + dir * innerH / 2;
+    const maxLines = Math.ceil(Math.abs(endC - c) / 0.5) + 4;
+    let fillEdge = null;
+    for (let i = 0; i < maxLines; i++) {
+      if (dir > 0 ? c > endC : c < endC) break;
+      let spacing = spacingAt(c);
+
+      // Density has hit the floor inside the tail — solid fill from here to the extreme and
+      // trim the line clip so the hatch→solid transition is a clean vertical edge.
+      const inTail = dir > 0 ? c >= tA : c <= tB;
+      if (fillEdge === null && spacing < hatchMinPx && inTail) {
+        fillEdge = c;
+        const fillA = dir > 0 ? Math.max(tA, c) : tA;
+        const fillB = dir > 0 ? tB : Math.min(tB, c);
         if (fillB - fillA > 0.5) {
           grp.append('rect').attr('class', 'hatch-fill')
             .attr('x', fillA).attr('width', fillB - fillA)
             .attr('y', 0).attr('height', innerH)
             .attr('fill-opacity', hatchFillOpacity);
-          // Trim the line clip at the fill edge so no diagonal slants into the solid block.
           if (dir > 0) clipRect.attr('width', Math.max(0, fillA - tA));
           else clipRect.attr('x', fillB).attr('width', Math.max(0, tB - fillB));
         }
-        break;
+      }
+      if (fillEdge !== null) {
+        // Keep marching half a height past the fill edge (at the floor spacing) so slanted
+        // lines anchored beyond it still cover the hatch strip's corners next to the fill —
+        // stopping dead at the edge is what cut the "/" texture along a diagonal.
+        spacing = Math.max(spacing, hatchMinPx);
+        if (dir > 0 ? c > fillEdge + innerH / 2 : c < fillEdge - innerH / 2) break;
       }
 
       linesG.append('line').attr('class', 'hatch-line')
-        .attr('x1', px).attr('y1', 0)
-        .attr('x2', px + hatchAngle * innerH).attr('y2', innerH)
+        .attr('x1', c - hatchAngle * innerH / 2).attr('y1', 0)
+        .attr('x2', c + hatchAngle * innerH / 2).attr('y2', innerH)
         .attr('stroke-opacity', hatchOpacity).attr('stroke-width', 1);
-      px += dir * spacing;
+      c += dir * spacing;
     }
   }
 
