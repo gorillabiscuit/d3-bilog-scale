@@ -16,14 +16,37 @@
       flex-direction: column;
     }
 
+    /* Chart tokens (CHART_CSS reads these; its fallbacks are dark-theme values, so the
+       light theme MUST define them — otherwise ruler lines render white-on-white and
+       annotation halos keep the dark surface colour). Mirrors index.html. */
     [data-theme="dark"] {
       --embed-bg: #16213e;
       --embed-text: #e0e0f0;
+      --dot-fill:          #7070ff;
+      --axis-color:        #3a3a6a;
+      --axis-text:         #a0a0c0;
+      --label-color:       #6060a0;
+      --tooltip-bg:        #0d1a33;
+      --tooltip-border:    #3a3a6a;
+      --tooltip-text:      #e0e0f0;
+      --tooltip-text-muted:#a0a0c0;
+      --ruler-tint:        #ffffff;
+      --chart-surface:     #16213e;
     }
 
     [data-theme="light"] {
       --embed-bg: #ffffff;
       --embed-text: #1a1a2e;
+      --dot-fill:          #4040cc;
+      --axis-color:        #c0c0d8;
+      --axis-text:         #5050a0;
+      --label-color:       #8080b0;
+      --tooltip-bg:        #f0f0ff;
+      --tooltip-border:    #c0c0d8;
+      --tooltip-text:      #1a1a2e;
+      --tooltip-text-muted:#5050a0;
+      --ruler-tint:        #4040cc;
+      --chart-surface:     #ffffff;
     }
 
     #chart-wrap {
