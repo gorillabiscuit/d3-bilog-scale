@@ -420,6 +420,7 @@ function renderPiecewise(points, {
     const side = extreme < boundary ? 'l' : 'r';
     svgDefs.selectAll(`[id^="${hatchInstId}-${side}"]`).remove();
     if (!(W > 0) || boundary === extreme) return;
+    const outward = Math.sign(extreme - boundary) || 1;
 
     // Whole-tail dimension annotation: log + dollar span, same classes as the ruler labels.
     const tA = Math.min(sub(boundary), sub(extreme)), tB = Math.max(sub(boundary), sub(extreme));
@@ -443,38 +444,64 @@ function renderPiecewise(points, {
         .attr('points', `${tB},${ANNOT_Y} ${tB - ANNOT_ARR},${ANNOT_Y - 3} ${tB - ANNOT_ARR},${ANNOT_Y + 3}`);
     }
 
-    // UNIFORM hatch — a flat texture marking "this region is log-compressed", like an
-    // engineering-drawing section hatch. Spacing is constant (hatchSpacing) across the whole
-    // tail: earlier versions varied density with the local compression rate, but graded
-    // spacing reads as an artifact rather than an encoding at this scale, and the region
-    // annotations already carry the compression numbers.
+    // DISCRETE log sections, stepped density. Each tail is tiled into window-width chunks —
+    // the same sections the ruler labels ×1, ×1, ×51 — and each section is hatched at ONE
+    // uniform spacing derived from that section's average compression vs the linear window,
+    // log-mapped (compression spans orders of magnitude; linear mapping would go sub-pixel).
+    // The section adjacent to the window is sparsest; each section outward steps denser, so
+    // "further from linear = more compressed" reads as discrete steps rather than the smooth
+    // gradient (which looked like an artifact) or a flat tint (which hid the differences).
     //
-    // Anchors are the line's x at MID-HEIGHT (y = innerH/2): a point (x, y) is only crossed
-    // by lines whose mid-height x lies within innerH/2 of it, and the march overshoots each
-    // tail edge by exactly innerH/2 — complete coverage for either hatchAngle, no wedges.
-    // A whole-tail clipPath trims the overshoot.
-    const clipId = `${hatchInstId}-${side}`;
-    svgDefs.append('clipPath').attr('id', clipId)
-      .append('rect').attr('x', tA).attr('width', Math.max(0, tB - tA)).attr('y', 0).attr('height', innerH);
-    const linesG = grp.append('g').attr('clip-path', `url(#${clipId})`);
+    // Two lessons from earlier iterations are baked in:
+    //  - Each section's lattice is phase-anchored at its INNER seam (the window-side edge),
+    //    so a line starts exactly at every section boundary — seams read as intentional
+    //    section starts, not as arbitrarily offset broken lines.
+    //  - Once the spacing floor is reached, ALL remaining sections merge into one (spacing
+    //    is monotone in compression), instead of fragmenting the far tail into dozens of
+    //    identical slivers with their own clips.
+    // Anchors are the line's x at mid-height; each section's march overshoots its clip by
+    // innerH/2 per side, which covers the section's corners for either hatchAngle.
+    const FLOOR = 1.5; // px — densest allowed lattice
 
-    // Spacing is uniform WITHIN a tail, but each tail's spacing reflects its overall
-    // compression: dollars-per-pixel in the tail vs in the linear window, log-mapped
-    // (compression spans orders of magnitude — the right tail can hold 50× the window's
-    // dollar range; linear mapping would go sub-pixel). An uncompressed tail hatches at
-    // hatchSpacing; each 10× of average compression adds one unit of density. This keeps
-    // the two tails visually distinct without the within-tail gradient that read as an
-    // artifact.
-    const windowRate = (currentR2 - currentR1) / W;            // px per dollar, linear window
-    const tailRate   = (tB - tA) / Math.abs(extreme - boundary); // px per dollar, tail average
-    const compression = Math.max(1, windowRate / tailRate);
-    const spacing = Math.max(1.5, hatchSpacing / (1 + Math.log10(compression)));
+    for (let k = 0; k < 4000; k++) {
+      const d0 = boundary + outward * k * W;
+      let d1 = boundary + outward * (k + 1) * W;
+      let last = outward > 0 ? d1 >= extreme : d1 <= extreme;
+      if (last) d1 = extreme;
+      let a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
 
-    for (let c = tA - innerH / 2; c <= tB + innerH / 2; c += spacing) {
-      linesG.append('line').attr('class', 'hatch-line')
-        .attr('x1', c - hatchAngle * innerH / 2).attr('y1', 0)
-        .attr('x2', c + hatchAngle * innerH / 2).attr('y2', innerH)
-        .attr('stroke-opacity', hatchOpacity).attr('stroke-width', 1);
+      // Ordinal density steps: each section outward is 0.75× the spacing of the one before.
+      // The sections all span the same dollar width, so ordinal position IS the compression
+      // ordering; a fixed ratio keeps every step VISIBLE (a compression-derived mapping
+      // asymptotes — by the fifth section the differences dropped below perception while
+      // never reaching the merge floor).
+      const spacing = Math.max(FLOOR, hatchSpacing * Math.pow(0.75, k));
+
+      // At the floor (or too narrow to lattice), every remaining section renders identically —
+      // merge them into one clip running to the extreme.
+      if (spacing <= FLOOR + 0.01 || b - a < 3) {
+        last = true;
+        a = Math.min(sub(d0), sub(extreme));
+        b = Math.max(sub(d0), sub(extreme));
+      }
+
+      const clipId = `${hatchInstId}-${side}${k}`;
+      svgDefs.append('clipPath').attr('id', clipId)
+        .append('rect').attr('x', a).attr('width', Math.max(0, b - a)).attr('y', 0).attr('height', innerH);
+      const sectionG = grp.append('g').attr('clip-path', `url(#${clipId})`);
+
+      // Lattice anchored at the inner seam: anchors seamC + n·spacing covering the section
+      // plus innerH/2 overshoot each side.
+      const seamC = outward > 0 ? a : b;
+      const lo = a - innerH / 2, hi = b + innerH / 2;
+      const startN = Math.ceil((lo - seamC) / spacing);
+      for (let c = seamC + startN * spacing; c <= hi; c += spacing) {
+        sectionG.append('line').attr('class', 'hatch-line')
+          .attr('x1', c - hatchAngle * innerH / 2).attr('y1', 0)
+          .attr('x2', c + hatchAngle * innerH / 2).attr('y2', innerH)
+          .attr('stroke-opacity', hatchOpacity).attr('stroke-width', 1);
+      }
+      if (last) break;
     }
   }
 
