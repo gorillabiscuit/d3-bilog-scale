@@ -738,16 +738,26 @@ createAdaptiveChart = {
 
   // ── Piecewise mode ────────────────────────────────────────────────────────────
 
+  // Unique per-instance prefix for hatch clipPath ids — Observable renders many cells at
+  // once; a shared id would silently clip the wrong chart.
+  let _hatchInstId = 0;
+
   function renderPiecewise(points, {
     x, width, height, windowFraction, breakpointMethod, xFormat,
     xLoOverride, xHiOverride, qLoOverride, qHiOverride, focusXLo, focusXHi,
     onWindowDrag, onWindowChange, onTravel,
     minWindowPx = 20,     // minimum pixel width the linear region can be dragged down to
     showHint = true,      // the fading "click a section · ←/→ to travel" badge on first render
+    tailTexture = 'ruler', // 'ruler' (chunk posts + per-chunk arrows) | 'hatch' (the diagonal-hatch
+                           // density encoding from the development process — kept as an option so
+                           // the article can embed the historical experiment on the current engine)
     tailTintBase = 0.02,  // fill opacity of the first (innermost) tail chunk
     tailTintStep = 0.012, // opacity added per chunk outward
     tailTintMax = 0.10,   // tint ceiling
     rulerMinPx = 2,       // tail chunk narrower than this stops the ruler (density cap)
+    hatchSpacing = 8,     // hatch mode: px between the uniformly spaced diagonal lines
+    hatchOpacity = 0.45,  // hatch mode: stroke opacity of the diagonal lines
+    hatchAngle = 1,       // hatch mode: 1 = "\" diagonals, -1 = "/" diagonals
     ...options
   }) {
     const marginLeft = options.marginLeft ?? MARGIN.left;
@@ -1064,9 +1074,110 @@ createAdaptiveChart = {
           .text(d => d.text);
     }
 
+    // ── Hatch texture (the development-process visual, kept as an option) ─────
+    // Uniformly spaced 45° diagonal <line> elements across each log tail — a flat section
+    // hatch marking the compressed regions, with one dimension annotation spanning the whole
+    // tail instead of the ruler's per-chunk arrows. Lines are explicit primitives inside a
+    // whole-tail clipPath — never SVG <pattern>, which Chrome clips at tile boundaries even
+    // with overflow:visible, leaving anti-aliased dots at every seam.
+    const hatchInstId = `hatch-${++_hatchInstId}`;
+    const svgDefs = d3.select(node).select('defs');
+
+    function drawTailHatch(grp, sub, boundary, extreme, W) {
+      grp.selectAll('*').remove();
+      const side = extreme < boundary ? 'l' : 'r';
+      svgDefs.selectAll(`[id^="${hatchInstId}-${side}"]`).remove();
+      if (!(W > 0) || boundary === extreme) return;
+      const outward = Math.sign(extreme - boundary) || 1;
+
+      // Whole-tail dimension annotation: log + dollar span, same classes as the ruler labels.
+      const tA = Math.min(sub(boundary), sub(extreme)), tB = Math.max(sub(boundary), sub(extreme));
+      if (tB - tA >= 2 * ANNOT_ARR + 28) {
+        const cx = (tA + tB) / 2;
+        grp.append('text').attr('class', 'ruler-lbl')
+          .attr('x', cx).attr('y', 8).attr('text-anchor', 'middle')
+          .attr('fill-opacity', 0.3).attr('font-size', '9px').attr('font-style', 'italic')
+          .text('log');
+        grp.append('text').attr('class', 'annot-value')
+          .attr('x', cx).attr('y', ANNOT_Y - 2).attr('text-anchor', 'middle')
+          .attr('fill-opacity', 0.65).attr('font-size', '10px').attr('font-weight', '500')
+          .text(xFmt(Math.abs(extreme - boundary)));
+        grp.append('line').attr('class', 'annot-line')
+          .attr('x1', tA + ANNOT_ARR).attr('x2', tB - ANNOT_ARR)
+          .attr('y1', ANNOT_Y).attr('y2', ANNOT_Y)
+          .attr('stroke-opacity', 0.45).attr('stroke-width', 1);
+        grp.append('polygon').attr('class', 'annot-arrow').attr('fill-opacity', 0.45)
+          .attr('points', `${tA},${ANNOT_Y} ${tA + ANNOT_ARR},${ANNOT_Y - 3} ${tA + ANNOT_ARR},${ANNOT_Y + 3}`);
+        grp.append('polygon').attr('class', 'annot-arrow').attr('fill-opacity', 0.45)
+          .attr('points', `${tB},${ANNOT_Y} ${tB - ANNOT_ARR},${ANNOT_Y - 3} ${tB - ANNOT_ARR},${ANNOT_Y + 3}`);
+      }
+
+      // DISCRETE log sections, stepped density. Each tail is tiled into window-width chunks —
+      // the same sections the ruler labels ×1, ×1, ×51 — and each section is hatched at ONE
+      // uniform spacing derived from that section's average compression vs the linear window,
+      // log-mapped (compression spans orders of magnitude; linear mapping would go sub-pixel).
+      // The section adjacent to the window is sparsest; each section outward steps denser, so
+      // "further from linear = more compressed" reads as discrete steps rather than the smooth
+      // gradient (which looked like an artifact) or a flat tint (which hid the differences).
+      //
+      // Two lessons from earlier iterations are baked in:
+      //  - Each section's lattice is phase-anchored at its INNER seam (the window-side edge),
+      //    so a line starts exactly at every section boundary — seams read as intentional
+      //    section starts, not as arbitrarily offset broken lines.
+      //  - Once the spacing floor is reached, ALL remaining sections merge into one (spacing
+      //    is monotone in compression), instead of fragmenting the far tail into dozens of
+      //    identical slivers with their own clips.
+      // Anchors are the line's x at mid-height; each section's march overshoots its clip by
+      // innerH/2 per side, which covers the section's corners for either hatchAngle.
+      const FLOOR = 1.5; // px — densest allowed lattice
+
+      for (let k = 0; k < 4000; k++) {
+        const d0 = boundary + outward * k * W;
+        let d1 = boundary + outward * (k + 1) * W;
+        let last = outward > 0 ? d1 >= extreme : d1 <= extreme;
+        if (last) d1 = extreme;
+        let a = Math.min(sub(d0), sub(d1)), b = Math.max(sub(d0), sub(d1));
+
+        // Ordinal density steps: each section outward is 0.75× the spacing of the one before.
+        // The sections all span the same dollar width, so ordinal position IS the compression
+        // ordering; a fixed ratio keeps every step VISIBLE (a compression-derived mapping
+        // asymptotes — by the fifth section the differences dropped below perception while
+        // never reaching the merge floor).
+        const spacing = Math.max(FLOOR, hatchSpacing * Math.pow(0.75, k));
+
+        // At the floor (or too narrow to lattice), every remaining section renders identically —
+        // merge them into one clip running to the extreme.
+        if (spacing <= FLOOR + 0.01 || b - a < 3) {
+          last = true;
+          a = Math.min(sub(d0), sub(extreme));
+          b = Math.max(sub(d0), sub(extreme));
+        }
+
+        const clipId = `${hatchInstId}-${side}${k}`;
+        svgDefs.append('clipPath').attr('id', clipId)
+          .append('rect').attr('x', a).attr('width', Math.max(0, b - a)).attr('y', 0).attr('height', innerH);
+        const sectionG = grp.append('g').attr('clip-path', `url(#${clipId})`);
+
+        // Lattice anchored at the inner seam: anchors seamC + n·spacing covering the section
+        // plus innerH/2 overshoot each side.
+        const seamC = outward > 0 ? a : b;
+        const lo = a - innerH / 2, hi = b + innerH / 2;
+        const startN = Math.ceil((lo - seamC) / spacing);
+        for (let c = seamC + startN * spacing; c <= hi; c += spacing) {
+          sectionG.append('line').attr('class', 'hatch-line')
+            .attr('x1', c - hatchAngle * innerH / 2).attr('y1', 0)
+            .attr('x2', c + hatchAngle * innerH / 2).attr('y2', innerH)
+            .attr('stroke-opacity', hatchOpacity).attr('stroke-width', 1);
+        }
+        if (last) break;
+      }
+    }
+
+    const drawTail = tailTexture === 'hatch' ? drawTailHatch : drawTailRuler;
+
     updateLinearAnnot(r1, r2, xLo, xHi);
-    drawTailRuler(leftRulerG,  leftScale,  xLo, xMin, xHi - xLo);
-    drawTailRuler(rightRulerG, rightScale, xHi, xMax, xHi - xLo);
+    drawTail(leftRulerG,  leftScale,  xLo, xMin, xHi - xLo);
+    drawTail(rightRulerG, rightScale, xHi, xMax, xHi - xLo);
 
     // Report the window the scale actually settled on (after capping) so the page readout
     // reflects what's rendered, not the raw slider quantiles.
@@ -1096,8 +1207,8 @@ createAdaptiveChart = {
         // Live x-axis redraw — colour is inherited from CHART_CSS, so just rebind the axis.
         g.select('.x-axis').call(d3.axisBottom(xScale).ticks(tickCountForWidth(innerW)).tickFormat(xFmt));
         updateLinearAnnot(currentR1, currentR2, currentXLo, currentXHi);
-        drawTailRuler(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
-        drawTailRuler(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
+        drawTail(leftRulerG,  leftScale,  currentXLo, xMin, currentXHi - currentXLo);
+        drawTail(rightRulerG, rightScale, currentXHi, xMax, currentXHi - currentXLo);
         rebuildTailOverlays();
         onWindowDrag?.({ xLo: currentXLo, xHi: currentXHi });
       }
@@ -1869,6 +1980,7 @@ CHART_CSS = (`
 .chart .pan-hint-bg,
 .chart .ruler-arrow line { stroke: var(--ruler-tint, #fff); }
 .chart .ruler-arrow polygon { fill: var(--ruler-tint, #fff); }
+.chart .hatch-line { stroke: var(--ruler-tint, #fff); }
 .chart .annot-value { paint-order: stroke fill; stroke: var(--chart-surface, #16213e); stroke-width: 3px; }
 `);
 ```
@@ -1979,6 +2091,37 @@ tickCountForWidth = innerW => Math.max(3, Math.round(innerW / 150))
 ## Cell 22 (md)
 
 ```md
+### The hatch texture
+
+An alternative tail texture from the development process, kept as an option: each tail is tiled into *window-width sections* (the same discrete sections the travel interaction uses), and each section is hatched at one uniform spacing, stepping 25% denser per section away from the linear window — a section hatch where density encodes "how many windows away", down to a 1.5px floor. Lines are explicit `<line>` elements inside per-section clipPaths rather than SVG `<pattern>`, which Chrome clips at tile boundaries even with `overflow: visible`.
+```
+
+---
+
+## Cell 23 (js)
+
+```js
+hatchChart = createAdaptiveChart(loans, {
+  x: d => d.amount,
+  y: d => d.rate,
+  label: d => d.name,
+  width, height: 320,
+  mode: "piecewise",
+  tailTexture: "hatch",
+  spread: null,
+  showHint: false,
+  xLabel: "Loan principal (USD)",
+  yLabel: "APR (%)",
+  xFormat: "currency",
+  onWindowChange: () => {}, // enables the drag handles; updates render in place
+})
+```
+
+---
+
+## Cell 24 (md)
+
+```md
 ## Notes
 
 - The linear window is **capped** so it can never swallow an outlier tail entirely — a structural guarantee (`windowBounds()`), not a heuristic, which is why no drag sequence can flatten the cluster.
@@ -1988,7 +2131,7 @@ tickCountForWidth = innerW => Math.max(3, Math.round(innerW / 150))
 
 ---
 
-## Cell 23 (js)
+## Cell 25 (js)
 
 ```js
 d3 = require("d3@7")

@@ -1,6 +1,6 @@
 # Submitting to Observable — step by step
 
-The paste-ready cells live in [notebook-cells.md](notebook-cells.md) (20 cells, in order).
+The paste-ready cells live in [notebook-cells.md](notebook-cells.md) (25 cells, in order).
 The transformed code has been verified: the scale passes all four invariants under the
 notebook's `d3` namespace, and the chart renders correctly in a browser against `d3@7`.
 
