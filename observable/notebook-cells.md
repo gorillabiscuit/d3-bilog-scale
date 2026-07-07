@@ -2080,39 +2080,6 @@ tickCountForWidth = innerW => Math.max(3, Math.round(innerW / 150))
 ## Cell 22 (md)
 
 ```md
-### The hatch texture
-
-An alternative tail texture from the development process, kept as an option: each tail is tiled into *window-width sections* (the same discrete sections the travel interaction uses), and each section is hatched at one uniform spacing, stepping 25% denser per section away from the linear window — a section hatch where density encodes "how many windows away", down to a 1.5px floor. Lines are explicit `<line>` elements inside per-section clipPaths rather than SVG `<pattern>`, which Chrome clips at tile boundaries even with `overflow: visible`.
-```
-
----
-
-## Cell 23 (js)
-
-```js
-hatchChart = createAdaptiveChart(sales, {
-  x: d => d.price,
-  y: d => d.perSqFt,
-  label: d => d.address,
-  meta: d => d.neighbourhood,
-  width, height: 320,
-  mode: "piecewise",
-  tailTexture: "hatch",
-  spread: null,
-  showHint: false,
-  xLabel: "Sale price (USD)",
-  yLabel: "Price per sq ft (USD)",
-  xFormat: "currency",
-  rankNoun: "sales",
-  onWindowChange: () => {}, // enables the drag handles; updates render in place
-})
-```
-
----
-
-## Cell 24 (md)
-
-```md
 ## Notes
 
 - The linear window is **capped** so it can never swallow an outlier tail entirely — a structural guarantee (`windowBounds()`), not a heuristic, which is why no drag sequence can flatten the cluster.
@@ -2122,7 +2089,7 @@ hatchChart = createAdaptiveChart(sales, {
 
 ---
 
-## Cell 25 (js)
+## Cell 23 (js)
 
 ```js
 d3 = require("d3@7")
