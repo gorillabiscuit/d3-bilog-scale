@@ -2044,7 +2044,7 @@ function makeFmt(specifier) {
   return specifier === 'currency' ? currencyFmt : d3.format(specifier);
 }
 
-fmtMult = n => {
+const fmtMult = n => {
   if (n >= 1000) return makeFmt('~s')(n);
   if (n >= 10)   return Math.round(n).toString();
   return Number.isInteger(n) ? n.toString() : n.toFixed(1);
@@ -2054,7 +2054,7 @@ fmtMult = n => {
 // the caller's job in the d3 idiom (ticks(count) on a scale means "about this many",
 // with density-vs-width tradeoffs decided by whoever owns the axis, not the scale).
 
-tickCountForWidth = innerW => Math.max(3, Math.round(innerW / 150))
+const tickCountForWidth = innerW => Math.max(3, Math.round(innerW / 150));
 ```
 
 ---
