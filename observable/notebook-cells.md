@@ -8,6 +8,15 @@ source transformation, no hand-split cells. Verified end-to-end in a real browse
 import resolves every export, the scale passes its invariants, and the chart renders
 correctly (regions, dots, formatted ticks, embedded CSS all confirmed).
 
+**Cells 2a/2b use dynamic `import()`, not Observable's static `import {...} from "url"`
+syntax.** The static form only reliably parses as `import * as ns from "url"` (namespace
+form) for external CDN URLs in classic notebooks — a destructured `import { a, b } from
+"url"` throws a parse-time error there (confirmed live: red caret under `import`, then
+`RuntimeError: createAdaptiveChart is not defined` downstream). Dynamic `import()` inside a
+plain `name = await expr` cell is unambiguous JS, avoids Observable's import-statement
+special-casing entirely, and is the exact mechanism verified against the published package
+before this file was finalized.
+
 ---
 
 ## Cell 1 (md)
@@ -29,7 +38,15 @@ Published on npm as [`d3-scale-adaptive`](https://www.npmjs.com/package/d3-scale
 ## Cell 2 (js)
 
 ```js
-import { scaleAdaptive, createAdaptiveChart } from "https://esm.sh/d3-scale-adaptive@1.0.0"
+scaleAdaptive = (await import("https://esm.sh/d3-scale-adaptive@1.0.0")).scaleAdaptive
+```
+
+---
+
+## Cell 2b (js)
+
+```js
+createAdaptiveChart = (await import("https://esm.sh/d3-scale-adaptive@1.0.0")).createAdaptiveChart
 ```
 
 ---
