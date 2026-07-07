@@ -2,6 +2,7 @@
 
 Decision log for the article. Timestamped one-liners only.
 
+- **[13:25]** Published d3-scale-adaptive@1.0.0 to npm after the manual cell-paste process broke twice live (my one-cell-per-multiple-bindings assumption was wrong for classic Observable notebooks, checked against docs). Rebuilt the notebook to import the CDN-hosted package directly (esm.sh resolves d3's submodule imports automatically) — 23 hand-transformed cells collapsed to 11. Verified against the real published package, not a local stand-in: CDN import resolves every export, scale invariants pass, chart renders 46 real NYC dots with correctly formatted ticks.
 - **[21:00]** Built an explicit Observable premium-submission rubric (d3-scale contract, Bostock chart conventions, parameter exposure, packaging) and audited the codebase against it — core math passed, API surface failed: no accessors, hardcoded margins/breakpoint method, no README.
 - **[21:05]** Completed the d3 scale contract: nice(), unknown(), and scaleAdaptive(domain, range) constructor args — the three missing conventions vs native continuous scales.
 - **[21:15]** Reshaped the chart to the Bostock accessor pattern (x/y/label/meta options, data of any shape) rather than requiring pre-shaped {x,y} points — the single biggest reusability gap in the audit.
