@@ -1,23 +1,59 @@
 {
-  "name": "d3-outlier-graphs",
+  "name": "d3-scale-adaptive",
   "version": "1.0.0",
-  "description": "Adaptive piecewise D3 scale for two-sided outlier distributions",
+  "description": "Adaptive piecewise log-linear-log D3 scale that keeps extreme outliers on screen without crushing the majority of the data",
   "type": "module",
+  "main": "src/lib.js",
+  "module": "src/lib.js",
+  "exports": {
+    ".": "./src/lib.js"
+  },
+  "files": [
+    "src/lib.js",
+    "src/scale/adaptive-scale.js",
+    "src/scale/breakpoints.js",
+    "src/scale/window.js",
+    "src/scale/detect.js",
+    "src/chart/adaptive-chart.js",
+    "src/chart/base-chart.js",
+    "src/utils/format.js",
+    "README.md"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": [],
+  "keywords": [
+    "d3",
+    "d3-module",
+    "scale",
+    "visualization",
+    "outliers",
+    "log-scale"
+  ],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gorillabiscuit/d3-bilog-scale.git"
+  },
   "devDependencies": {
+    "d3": "^7.9.0",
     "linkedom": "^0.18.12",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
   },
   "dependencies": {
-    "d3": "^7.9.0"
+    "d3-array": "^3.2.4",
+    "d3-axis": "^3.0.0",
+    "d3-drag": "^3.0.0",
+    "d3-ease": "^3.0.1",
+    "d3-force": "^3.0.0",
+    "d3-format": "^3.1.2",
+    "d3-scale": "^4.0.2",
+    "d3-selection": "^3.0.0",
+    "d3-timer": "^3.0.1"
   }
 }
