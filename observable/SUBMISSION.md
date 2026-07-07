@@ -19,7 +19,7 @@ styles before and after the fix.
 
 Verified end-to-end in a real browser before handing off: the CDN import resolves every
 export, the scale passes its invariants, and the chart renders correctly against the real
-embedded NYC dataset (46 rows, correct regions, formatted currency ticks).
+embedded SBA loan dataset (600 real rows, correct regions, formatted currency ticks).
 
 ## Steps
 
@@ -29,7 +29,7 @@ embedded NYC dataset (46 rows, correct regions, formatted currency ticks).
    cells, `js` blocks into JavaScript cells. Order in the file is presentation order;
    Observable resolves dependencies topologically, so it will run correctly as soon as
    all cells are in, regardless of paste order.
-4. **Check the demo:** the chart cell should render the NYC sales dataset with the window
+4. **Check the demo:** the chart cell should render the SBA loan dataset with the window
    slider live. Drag the window / handles and confirm the position persists across the
    reactive re-render (that's the `mutable windowState` loop).
 5. **Add a thumbnail** — Observable auto-captures, but a manually chosen frame of the
