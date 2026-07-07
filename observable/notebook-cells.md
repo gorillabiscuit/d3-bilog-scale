@@ -98,6 +98,17 @@ chart = {
     spread: true,
     spreadSeed: this?.spreadOffsets, // keep each dot on its side of the cluster across re-renders
   });
+  // CHART_CSS's fallback colours assume a DARK page (--ruler-tint defaults to white,
+  // --chart-surface to navy) — right for the article this scale was built for, wrong for
+  // Observable's white notebook page: the tail rulers render as invisible white-on-white
+  // strokes. Setting the same custom properties the article's light theme uses fixes it.
+  const lightTheme = {
+    "--dot-fill": "#4040cc", "--axis-color": "#c0c0d8", "--axis-text": "#5050a0",
+    "--label-color": "#8080b0", "--tooltip-bg": "#f0f0ff", "--tooltip-border": "#c0c0d8",
+    "--tooltip-text": "#1a1a2e", "--tooltip-text-muted": "#5050a0",
+    "--ruler-tint": "#4040cc", "--chart-surface": "#ffffff",
+  };
+  for (const [k, v] of Object.entries(lightTheme)) node.style.setProperty(k, v);
   return node;
 }
 ```

@@ -2,6 +2,7 @@
 
 Decision log for the article. Timestamped one-liners only.
 
+- **[13:35]** Notebook chart looked "nothing like" the article's on Observable's white page: CHART_CSS's fallback colours (--ruler-tint white, --chart-surface navy) assume a dark background -- tail rulers rendered white-on-white, invisible. Fixed by setting the article's light-theme custom properties directly on the chart cell's returned node. Confirmed via computed-style inspection (white->indigo stroke) and a side-by-side screenshot before shipping the fix.
 - **[13:25]** Published d3-scale-adaptive@1.0.0 to npm after the manual cell-paste process broke twice live (my one-cell-per-multiple-bindings assumption was wrong for classic Observable notebooks, checked against docs). Rebuilt the notebook to import the CDN-hosted package directly (esm.sh resolves d3's submodule imports automatically) — 23 hand-transformed cells collapsed to 11. Verified against the real published package, not a local stand-in: CDN import resolves every export, scale invariants pass, chart renders 46 real NYC dots with correctly formatted ticks.
 - **[21:00]** Built an explicit Observable premium-submission rubric (d3-scale contract, Bostock chart conventions, parameter exposure, packaging) and audited the codebase against it — core math passed, API surface failed: no accessors, hardcoded margins/breakpoint method, no README.
 - **[21:05]** Completed the d3 scale contract: nice(), unknown(), and scaleAdaptive(domain, range) constructor args — the three missing conventions vs native continuous scales.

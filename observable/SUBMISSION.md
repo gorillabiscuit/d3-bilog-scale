@@ -1,11 +1,21 @@
 # Submitting to Observable — step by step
 
-The paste-ready cells live in [notebook-cells.md](notebook-cells.md) — just **11 cells**,
+The paste-ready cells live in [notebook-cells.md](notebook-cells.md) — just **12 cells**,
 in order. This version imports the published npm package
 ([`d3-scale-adaptive`](https://www.npmjs.com/package/d3-scale-adaptive)) directly from a CDN
-(`https://esm.sh/d3-scale-adaptive@1.0.0`), so there's no manually-transformed library source
-to paste — Observable's `import {...} from "url"` syntax handles it, and esm.sh resolves all
-the underlying `d3-scale`/`d3-array`/etc. bare imports automatically.
+(`https://esm.sh/d3-scale-adaptive@1.0.0`) via two dynamic-`import()` cells (2a/2b) — no
+manually-transformed library source to paste, and esm.sh resolves all the underlying
+`d3-scale`/`d3-array`/etc. bare imports automatically. (Observable's *static*
+`import {a, b} from "url"` syntax does NOT reliably support destructured named imports from
+arbitrary CDN URLs in classic notebooks — confirmed by hitting it live. Dynamic `import()`
+inside a plain cell sidesteps that entirely.)
+
+The chart cell also sets light-theme CSS custom properties directly on the returned node
+(`--ruler-tint`, `--chart-surface`, etc.). The library's default colours assume a **dark**
+page background (built for the source article's dark theme) — on Observable's white page,
+the tail-ruler strokes render white-on-white and vanish. This was caught by comparing the
+live notebook screenshot against the reference chart and confirmed by inspecting computed
+styles before and after the fix.
 
 Verified end-to-end in a real browser before handing off: the CDN import resolves every
 export, the scale passes its invariants, and the chart renders correctly against the real
