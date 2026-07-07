@@ -1,6 +1,6 @@
 # Submitting to Observable — step by step
 
-The paste-ready cells live in [notebook-cells.md](notebook-cells.md) — just **12 cells**,
+The paste-ready cells live in [notebook-cells.md](notebook-cells.md) — just **11 cells**,
 in order. This version imports the published npm package
 ([`d3-scale-adaptive`](https://www.npmjs.com/package/d3-scale-adaptive)) directly from a CDN
 (`https://esm.sh/d3-scale-adaptive@1.0.0`) via two dynamic-`import()` cells (2a/2b) — no
@@ -45,7 +45,8 @@ embedded SBA loan dataset (600 real rows, correct regions, formatted currency ti
 - The **demo interaction** — drag, travel, reset.
 - The **source repo** ([github.com/gorillabiscuit/d3-bilog-scale](https://github.com/gorillabiscuit/d3-bilog-scale))
   for the d3 contract methods, the four invariants, and the 86-test suite — linked from
-  cell 1 and cell 9.
+  cell 1 and cell 8 (the source repo link also appears in cell 6, since the dataset now
+  fetches live from it, pinned to a commit).
 
 ## Two Observable-specific notes
 
