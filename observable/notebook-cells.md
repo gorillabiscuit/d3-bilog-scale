@@ -34,10 +34,11 @@ chart = {
   // Read the PLAIN windowState (reactive dependency: window changes re-run this cell);
   // write via `mutable windowState` inside the event handlers.
   const s = windowState;
-  const node = createAdaptiveChart(loans, {
-    x: d => d.amount,
-    y: d => d.rate,
-    label: d => d.name,
+  const node = createAdaptiveChart(sales, {
+    x: d => d.price,
+    y: d => d.perSqFt,
+    label: d => d.address,
+    meta: d => d.neighbourhood,
     width, height: 420,
     mode: "piecewise",
     windowFraction,
@@ -58,9 +59,10 @@ chart = {
     onTravel: ({ xLo, xHi }) => {
       mutable windowState = { focusXLo: xLo, focusXHi: xHi };
     },
-    xLabel: "Loan principal (USD)",
-    yLabel: "APR (%)",
+    xLabel: "Sale price (USD)",
+    yLabel: "Price per sq ft (USD)",
     xFormat: "currency",
+    rankNoun: "sales",
     spread: true,
     spreadSeed: this?.spreadOffsets, // keep each dot on its side of the cluster across re-renders
   });
@@ -83,7 +85,7 @@ mutable windowState = ({})
 ```md
 ## The dataset
 
-200 synthetic small-business loans, seeded so the notebook is reproducible: 84% under $10k (median ≈ $6k), with ten outliers running from $120k to $1.2M. Swap in your own data — the chart takes accessors (`x`, `y`, `label`), so any array of objects works.
+A frozen snapshot of NYC's rolling property-sales feed (data.cityofnewyork.us), captured 2026-06-29 — real transactions, not synthetic. It has exactly the shape the scale exists for: $0/$1 nominal deed transfers sit at one extreme, a $168M hotel sale at the other, and the bulk of ordinary residential and small-commercial sales cluster in between. Swap in your own data — the chart takes accessors (`x`, `y`, `label`), so any array of objects works.
 ```
 
 ---
@@ -91,18 +93,12 @@ mutable windowState = ({})
 ## Cell 6 (js)
 
 ```js
-loans = {
-  const rand = mulberry32(0xd3ad);
-  const out = [];
-  for (let i = 0; i < 190; i++) {
-    const amount = Math.round(1500 + Math.exp(rand() * 2.2) * 900 * rand());
-    out.push({ name: `Loan #${i + 1}`, amount, rate: +(4 + rand() * 14).toFixed(1) });
-  }
-  const outliers = [120_000, 175_000, 240_000, 310_000, 420_000, 560_000, 700_000, 880_000, 1_050_000, 1_200_000];
-  outliers.forEach((amount, i) =>
-    out.push({ name: `Outlier #${i + 1}`, amount, rate: +(3 + rand() * 6).toFixed(1) }));
-  return out;
-}
+sales = d3.csvParse(salesCSV, (d) => ({
+  price: +d.x,
+  perSqFt: +d.y,
+  address: d.label,
+  neighbourhood: d.meta,
+}))
 ```
 
 ---
@@ -110,14 +106,7 @@ loans = {
 ## Cell 7 (js)
 
 ```js
-function mulberry32(a) {
-  return function () {
-    let t = (a += 0x6d2b79f5);
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+salesCSV = "x,y,label,meta\n540000,29.582557247726527,\"745 East 6th Street, 1b\",Alphabet City · Rentals - Walkup Apartments\n8600000,442.88804202286536,208 East 7th Street,Alphabet City · Rentals - Walkup Apartments\n4665000,1401.7427884615386,191 East 7 Street,Alphabet City · Rentals - Walkup Apartments\n280000,40.72727272727273,\"510 East 5th Street, 9\",Alphabet City · Rentals - Walkup Apartments\n8800000,1228.0212112754675,207 East 4 Street,Alphabet City · Rentals - Walkup Apartments\n4000000,572.2460658082975,327 East 10 Street,Alphabet City · Rentals - Walkup Apartments\n13000000,454.22781271837874,183 Avenue C,Alphabet City · Rentals - Elevator Apartments\n16700000,383.73161764705884,176 East 3 Street,Alphabet City · Rentals - Elevator Apartments\n8685245,767.9261715296198,204 Avenue A,Alphabet City · Rentals - Elevator Apartments\n597997,52.87329796640142,\"204 Avenue A, 3a\",Alphabet City · Rentals - Elevator Apartments\n112250000,1015.5613860490365,\"250 East Houston Street, 1\",Alphabet City · Special Condo Billing Lots\n3550000,509.325681492109,703 East 6 Street,Alphabet City · Office Buildings\n5000000,1183.7121212121212,195 East 3 Street,Alphabet City · Theatres\n4775000,1419.8632173654476,304 West 18th Street,Chelsea · One Family Dwellings\n13100000,2980.6598407281003,344 W 22 Street,Chelsea · One Family Dwellings\n13500000,4437.869822485207,348 West 22 Street,Chelsea · One Family Dwellings\n11600000,1486.2267777065983,217 West 20 Street,Chelsea · One Family Dwellings\n7650000,2273.402674591382,204 West 21st Street,Chelsea · One Family Dwellings\n10600000,1578.5554728220402,224 West 22nd Street,Chelsea · One Family Dwellings\n14999999,1667.2222963209958,150 West 15th Street,Chelsea · One Family Dwellings\n4999999,1025.6408205128205,443 West 19th Street,Chelsea · Two Family Dwellings\n4500000,1339.2857142857142,447 West 24th,Chelsea · Two Family Dwellings\n7800000,1846.590909090909,343 West 19 Street,Chelsea · Two Family Dwellings\n10600000,1152.1739130434783,313 West 20 Street,Chelsea · Two Family Dwellings\n7500000,1704.5454545454545,125 West 15th Street,Chelsea · Three Family Dwellings\n5750000,809.8591549295775,446 West 19th Street,Chelsea · Rentals - Walkup Apartments\n9250000,1159.1478696741854,410 West 22nd Street,Chelsea · Rentals - Walkup Apartments\n10,0.0009402914903620122,246 10th Avenue,Chelsea · Rentals - Walkup Apartments\n10,0.001035625517812759,248 10th Avenue,Chelsea · Rentals - Walkup Apartments\n6650000,1209.090909090909,331 West 19 Street,Chelsea · Rentals - Walkup Apartments\n16625000,1539.351851851852,205 8 Avenue,Chelsea · Rentals - Walkup Apartments\n16625000,1539.351851851852,207 8 Avenue,Chelsea · Rentals - Walkup Apartments\n5000000,874.1258741258741,356 West 21st Street,Chelsea · Rentals - Walkup Apartments\n5400000,1200,217 West 15 Street,Chelsea · Rentals - Walkup Apartments\n45500,3.3886944216876445,534 West 29,Chelsea · Rentals - Elevator Apartments\n20000000,1047.1204188481674,448-450 West 19th Street,Chelsea · Rentals - Elevator Apartments\n242500,20.815450643776824,\"411 West 24th Street, 11e\",Chelsea · Rentals - Elevator Apartments\n8500000,414.7150663544106,313-315 West 21 Street,Chelsea · Rentals - Elevator Apartments\n12500000,991.3553810770085,135 West 24th Street,Chelsea · Rentals - Elevator Apartments\n21000000,2720.559657986786,58-60 Ninth Ave,Chelsea · Rentals - 4-10 Unit\n350000,105.10510510510511,210 7 Avenue,Chelsea · Rentals - 4-10 Unit\n46181250,837.5120146533433,541 West 21 Street,Chelsea · Office Buildings\n3250000,91.29213483146067,\"127 West 24th Street, 2\",Chelsea · Office Buildings\n7100000,614.7186147186147,131 West 14 Street,Chelsea · Store Buildings\n168618594,1089.182970312379,113-117 West 24 Street,Chelsea · Luxury Hotels\n25150000,727.6777964238181,550 West 25 Street,Chelsea · Commercial Garages"
 ```
 
 ---
@@ -2101,18 +2090,20 @@ An alternative tail texture from the development process, kept as an option: eac
 ## Cell 23 (js)
 
 ```js
-hatchChart = createAdaptiveChart(loans, {
-  x: d => d.amount,
-  y: d => d.rate,
-  label: d => d.name,
+hatchChart = createAdaptiveChart(sales, {
+  x: d => d.price,
+  y: d => d.perSqFt,
+  label: d => d.address,
+  meta: d => d.neighbourhood,
   width, height: 320,
   mode: "piecewise",
   tailTexture: "hatch",
   spread: null,
   showHint: false,
-  xLabel: "Loan principal (USD)",
-  yLabel: "APR (%)",
+  xLabel: "Sale price (USD)",
+  yLabel: "Price per sq ft (USD)",
   xFormat: "currency",
+  rankNoun: "sales",
   onWindowChange: () => {}, // enables the drag handles; updates render in place
 })
 ```
